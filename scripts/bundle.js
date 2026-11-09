@@ -4,9 +4,7 @@ import { copyFileSync, existsSync, readdirSync, readFileSync, writeFileSync } fr
 import { join } from "node:path";
 import { build } from "esbuild";
 
-const REQUIRE =
-  'import { createRequire as __createRequire } from "node:module";\nconst require = __createRequire(import.meta.url);';
-const bundle = (entry, outfile, banner) =>
+const bundle = (entry, outfile, banner = "") =>
   build({
     entryPoints: [entry],
     bundle: true,
@@ -19,8 +17,8 @@ const bundle = (entry, outfile, banner) =>
     legalComments: "none",
   });
 const results = [
-  await bundle("src/main.ts", "dist/agentexec.js", `#!/usr/bin/env node\n${REQUIRE}`),
-  await bundle("src/lib.ts", "dist/lib.js", REQUIRE),
+  await bundle("src/main.ts", "dist/agentexec.js", "#!/usr/bin/env node"),
+  await bundle("src/lib.ts", "dist/lib.js"),
 ];
 copyFileSync("out/src/lib.d.ts", "dist/lib.d.ts");
 
