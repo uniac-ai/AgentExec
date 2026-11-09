@@ -1,7 +1,7 @@
 // Reading, listing and editing files. An edit replaces exact text and answers with a diff.
 import { randomBytes } from "node:crypto";
-import { lstat, readdir, readFile, rename, rm, stat, writeFile } from "node:fs/promises";
-import { dirname, join, resolve } from "node:path";
+import { lstat, readdir, readFile, realpath, rename, rm, stat, writeFile } from "node:fs/promises";
+import { basename, dirname, join, resolve, sep } from "node:path";
 import { createTwoFilesPatch } from "diff";
 import { cut } from "./output.ts";
 import { ExecRefused } from "./sessions.ts";
@@ -29,8 +29,40 @@ const refusing = async <T>(work: () => Promise<T>) => {
   }
 };
 
+/**
+ * Where `path` really is, following links, if that is inside `root`, which must itself be a real
+ * path. A path that doesn't exist yet is judged by the nearest folder above it that does. This is
+ * a check, not a boundary: only the host running this can make one.
+ */
+export async function inside(root: string, path: string): Promise<string> {
+  const refused = () => new ExecRefused(`${path} is outside the workspace.`);
+  const wanted = resolve(root, path);
+  const real = async (at: string): Promise<string> => {
+    try {
+      return await realpath(at);
+    } catch (error) {
+      const { code } = error as NodeJS.ErrnoException;
+      if (code !== "ENOENT" && code !== "ENOTDIR") throw error;
+      // A link that points nowhere can't be judged by what is above it.
+      if (
+        await lstat(at).then(
+          () => true,
+          () => false,
+        )
+      )
+        throw refused();
+      const above = dirname(at);
+      if (above === at) throw refused();
+      return join(await real(above), basename(at));
+    }
+  };
+  const found = await real(wanted);
+  if (found !== root && !found.startsWith(root + sep)) throw refused();
+  return found;
+}
+
 export function createFiles(root: string) {
-  const at = (path: string) => resolve(root, path);
+  const at = (path: string) => inside(root, path);
   const text = async (path: string) => {
     const bytes = await readFile(path);
     if (bytes.includes(0)) throw new ExecRefused(`${path} is a binary file.`);
@@ -41,7 +73,7 @@ export function createFiles(root: string) {
     /** Numbered lines of a file. */
     read: (input: { path: string; offset?: number | undefined; limit?: number | undefined }) =>
       refusing(async () => {
-        const lines = (await text(at(input.path))).split("\n");
+        const lines = (await text(await at(input.path))).split("\n");
         const first = Math.max(input.offset ?? 1, 1);
         const shown = lines
           .slice(first - 1, first - 1 + (input.limit ?? DEFAULT_LINES))
@@ -53,7 +85,7 @@ export function createFiles(root: string) {
     /** A folder's entries, folders first, each folder ending in `/`. */
     list: (input: { path?: string | undefined }) =>
       refusing(async () => {
-        const folder = at(input.path ?? ".");
+        const folder = await at(input.path ?? ".");
         const entries = await readdir(folder, { withFileTypes: true });
         entries.sort(
           (a, b) =>
@@ -81,7 +113,7 @@ export function createFiles(root: string) {
       replace_all?: boolean | undefined;
     }) =>
       refusing(async () => {
-        const path = at(input.path);
+        const path = await at(input.path);
         const found = await stat(path).catch((error: NodeJS.ErrnoException) => {
           if (error.code === "ENOENT") return undefined;
           throw error;

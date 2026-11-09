@@ -3,10 +3,12 @@
 A terminal and files for an agent: six tools over MCP on stdio. It has no telemetry, holds no credentials, and depends on nothing but Node 22.15 or later: the build is one file.
 
 ```sh
-node dist/agentexec.js --workspace /path/to/folder
+node dist/agentexec.js --workspace /path/to/folder --level files
 ```
 
-It runs commands and changes files with the rights of whoever starts it. It confines nothing, so run it somewhere that is safe for an agent to act.
+`--level` decides which tools it offers, each level containing the one before: `read` (the default) has `read`, `list` and `search`; `files` adds `edit`; `terminal` adds `exec_command` and `write_stdin`.
+
+It acts with the rights of whoever starts it. The file tools stay inside the workspace, following links, but that is a check and not a boundary, and at `terminal` a command can reach anything those rights can. Run it somewhere that is safe for an agent to act.
 
 ## Tools
 
@@ -19,7 +21,7 @@ It runs commands and changes files with the rights of whoever starts it. It conf
 | `search`       | Text under a folder, as `path:line:text`. Exact text unless `regex`. Skips what `.gitignore` ignores, `.git` and `node_modules`.                                                              |
 | `edit`         | Replaces exact text, which must appear once unless `replace_all`, and answers with a unified diff. An empty `old_text` creates a new file.                                                    |
 
-Relative paths are relative to the workspace. A failed tool sets MCP's `isError`; a command that exits non-zero is an answer, not a failure.
+Relative paths are relative to the workspace, and a path that really lies outside it is refused. A failed tool sets MCP's `isError`; a command that exits non-zero is an answer, not a failure.
 
 ## The answer from `exec_command` and `write_stdin`
 

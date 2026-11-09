@@ -36,50 +36,56 @@ const YieldTime = z.number().int().positive().optional();
 const MaxTokens = z.number().int().positive().optional();
 const READ_ONLY = { readOnlyHint: true };
 
-export function createServer(root: string, sessions: Sessions, version: string) {
+/** How far an agent reaches, each level containing the one before. */
+export const LEVELS = ["read", "files", "terminal"] as const;
+export type Level = (typeof LEVELS)[number];
+
+export function createServer(root: string, sessions: Sessions, version: string, level: Level) {
   const server = new McpServer({ name: "agentexec", version });
   const files = createFiles(root);
 
-  server.registerTool(
-    "exec_command",
-    {
-      description:
-        "Runs a command in a shell. Answers when it ends, or after yield_time_ms with a session_id while it keeps running; use write_stdin to check on it or type into it. Every answer gives exit_code, seconds, session_id and text.",
-      inputSchema: {
-        cmd: z.string().min(1).describe("The command, run by a login shell."),
-        workdir: z.string().optional().describe("Where to run it; the workspace by default."),
-        yield_time_ms: YieldTime.describe("How long to wait: 250 to 30000, by default 10000."),
-        max_output_tokens: MaxTokens.describe("About how much output to return."),
+  if (level === "terminal") {
+    server.registerTool(
+      "exec_command",
+      {
+        description:
+          "Runs a command in a shell. Answers when it ends, or after yield_time_ms with a session_id while it keeps running; use write_stdin to check on it or type into it. Every answer gives exit_code, seconds, session_id and text.",
+        inputSchema: {
+          cmd: z.string().min(1).describe("The command, run by a login shell."),
+          workdir: z.string().optional().describe("Where to run it; the workspace by default."),
+          yield_time_ms: YieldTime.describe("How long to wait: 250 to 30000, by default 10000."),
+          max_output_tokens: MaxTokens.describe("About how much output to return."),
+        },
+        outputSchema: Answered,
+        annotations: { destructiveHint: true },
       },
-      outputSchema: Answered,
-      annotations: { destructiveHint: true },
-    },
-    (input) => answering(() => sessions.exec(input)),
-  );
-  server.registerTool(
-    "write_stdin",
-    {
-      description:
-        "Types into a running command and returns what it wrote since. With no chars, waits and returns what it has written. A Ctrl-C character (\\u0003) interrupts it; Ctrl-D (\\u0004) ends its input.",
-      inputSchema: {
-        session_id: z.string().min(1).describe("From exec_command's answer."),
-        chars: z.string().optional().describe("What to type; include \\n to press Enter."),
-        yield_time_ms: YieldTime.describe(
-          "How long to wait: with chars 250 to 30000, by default 250; with none 5000 to 30000.",
-        ),
-        max_output_tokens: MaxTokens.describe("About how much output to return."),
+      (input) => answering(() => sessions.exec(input)),
+    );
+    server.registerTool(
+      "write_stdin",
+      {
+        description:
+          "Types into a running command and returns what it wrote since. With no chars, waits and returns what it has written. A Ctrl-C character (\\u0003) interrupts it; Ctrl-D (\\u0004) ends its input.",
+        inputSchema: {
+          session_id: z.string().min(1).describe("From exec_command's answer."),
+          chars: z.string().optional().describe("What to type; include \\n to press Enter."),
+          yield_time_ms: YieldTime.describe(
+            "How long to wait: with chars 250 to 30000, by default 250; with none 5000 to 30000.",
+          ),
+          max_output_tokens: MaxTokens.describe("About how much output to return."),
+        },
+        outputSchema: Answered,
+        annotations: { destructiveHint: true },
       },
-      outputSchema: Answered,
-      annotations: { destructiveHint: true },
-    },
-    (input) => answering(() => sessions.write(input)),
-  );
+      (input) => answering(() => sessions.write(input)),
+    );
+  }
   server.registerTool(
     "read",
     {
       description: "Reads a text file as numbered lines.",
       inputSchema: {
-        path: z.string().min(1).describe("Relative to the workspace, or absolute."),
+        path: z.string().min(1).describe("Inside the workspace; relative to it, or absolute."),
         offset: z.number().int().positive().optional().describe("The first line, from 1."),
         limit: z.number().int().positive().optional().describe("How many lines; 2000 by default."),
       },
@@ -112,20 +118,21 @@ export function createServer(root: string, sessions: Sessions, version: string) 
     },
     (input) => saying(() => search(root, input)),
   );
-  server.registerTool(
-    "edit",
-    {
-      description:
-        "Replaces exact text in a file and answers with a unified diff. old_text must appear exactly once unless replace_all. An empty old_text creates a new file.",
-      inputSchema: {
-        path: z.string().min(1).describe("Relative to the workspace, or absolute."),
-        old_text: z.string().describe("The exact text to replace, whitespace included."),
-        new_text: z.string().describe("What to put in its place."),
-        replace_all: z.boolean().optional(),
+  if (level !== "read")
+    server.registerTool(
+      "edit",
+      {
+        description:
+          "Replaces exact text in a file and answers with a unified diff. old_text must appear exactly once unless replace_all. An empty old_text creates a new file.",
+        inputSchema: {
+          path: z.string().min(1).describe("Inside the workspace; relative to it, or absolute."),
+          old_text: z.string().describe("The exact text to replace, whitespace included."),
+          new_text: z.string().describe("What to put in its place."),
+          replace_all: z.boolean().optional(),
+        },
+        annotations: { destructiveHint: true },
       },
-      annotations: { destructiveHint: true },
-    },
-    (input) => saying(() => files.edit(input)),
-  );
+      (input) => saying(() => files.edit(input)),
+    );
   return server;
 }

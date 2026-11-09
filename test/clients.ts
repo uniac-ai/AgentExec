@@ -25,12 +25,12 @@ export const environment = (workspace: string): Record<string, string> => ({
   SHELL: "/bin/bash",
 });
 
-async function typescriptClient(workspace: string): Promise<McpClient> {
+async function typescriptClient(workspace: string, level: string): Promise<McpClient> {
   const client = new Client({ name: "conformance", version: "1.0.0" });
   await client.connect(
     new StdioClientTransport({
       command: process.execPath,
-      args: [SERVER, "--workspace", workspace],
+      args: [SERVER, "--workspace", workspace, "--level", level],
       env: environment(workspace),
     }),
   );
@@ -48,7 +48,7 @@ async function typescriptClient(workspace: string): Promise<McpClient> {
   };
 }
 
-async function pythonClient(workspace: string): Promise<McpClient> {
+async function pythonClient(workspace: string, level: string): Promise<McpClient> {
   const child: ChildProcess = spawn(
     process.env.AGENTEXEC_PYTHON ?? "python3",
     [
@@ -57,6 +57,8 @@ async function pythonClient(workspace: string): Promise<McpClient> {
       SERVER,
       "--workspace",
       workspace,
+      "--level",
+      level,
     ],
     { env: environment(workspace), stdio: ["pipe", "pipe", "inherit"] },
   );

@@ -16,7 +16,10 @@ test("at the most commands running, a new one is refused and none is evicted", a
   assert.equal(new Set(started.map((one) => one.session_id)).size, MAX_RUNNING);
   await assert.rejects(sessions.exec({ cmd: "true" }), ExecRefused);
   const session_id = started[0]?.session_id as string;
-  assert.equal((await sessions.write({ session_id, chars: "still here\n" })).text, "still here\n");
+  assert.equal(
+    (await sessions.write({ session_id, chars: "still here\n", yield_time_ms: 5000 })).text,
+    "still here\n",
+  );
 });
 
 test("what is held between polls keeps its head and tail", () => {

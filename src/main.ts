@@ -1,19 +1,23 @@
-// AgentExec: `agentexec [--workspace DIR]` serves MCP over stdio.
+// AgentExec: `agentexec [--workspace DIR] [--level read|files|terminal]` serves MCP over stdio.
 import { realpathSync } from "node:fs";
 import { resolve } from "node:path";
 import { parseArgs } from "node:util";
 import { StdioServerTransport } from "@modelcontextprotocol/server/stdio";
 import { serveSearch } from "./search.ts";
-import { createServer } from "./server.ts";
+import { createServer, LEVELS, type Level } from "./server.ts";
 import { Sessions } from "./sessions.ts";
 
 const VERSION = "0.0.1";
 
 async function main() {
-  const { values } = parseArgs({ options: { workspace: { type: "string" } } });
+  const { values } = parseArgs({
+    options: { workspace: { type: "string" }, level: { type: "string" } },
+  });
+  const level = (values.level ?? "read") as Level;
+  if (!LEVELS.includes(level)) throw new Error(`--level is one of ${LEVELS.join(", ")}.`);
   const root = realpathSync(resolve(values.workspace ?? process.cwd()));
   const sessions = new Sessions(root);
-  const server = createServer(root, sessions, VERSION);
+  const server = createServer(root, sessions, VERSION, level);
   let stopping = false;
   const stop = async () => {
     if (stopping) return;

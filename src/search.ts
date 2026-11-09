@@ -4,6 +4,7 @@ import { readdirSync, readFileSync, statSync } from "node:fs";
 import { join, relative, resolve, sep } from "node:path";
 import { parentPort, Worker, workerData } from "node:worker_threads";
 import ignore, { type Ignore } from "ignore";
+import { inside } from "./files.ts";
 import { ExecRefused } from "./sessions.ts";
 
 const DEADLINE_MS = 20_000;
@@ -87,9 +88,10 @@ export function serveSearch(): boolean {
 }
 
 /** Search on a thread of this same file, stopped at the deadline. */
-export function search(root: string, input: SearchInput): Promise<string> {
+export async function search(root: string, input: SearchInput): Promise<string> {
+  const path = await inside(root, input.path ?? ".");
   return new Promise((done, failed) => {
-    const workerData: Job = { ...input, root, agentexecSearch: true };
+    const workerData: Job = { ...input, path, root, agentexecSearch: true };
     // The running file itself, which answers as a search thread (`serveSearch`).
     const worker = new Worker(process.argv[1] as string, { workerData });
     const timer = setTimeout(() => {

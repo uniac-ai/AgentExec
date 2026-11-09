@@ -33,7 +33,12 @@ async def main():
             running = set()
 
             async def serve(request):
-                print(json.dumps(await answer(session, request)), flush=True)
+                try:
+                    reply = await answer(session, request)
+                except Exception as error:
+                    # A call the protocol itself refuses, such as a tool this server doesn't offer.
+                    reply = {"id": request["id"], "text": str(error), "isError": True}
+                print(json.dumps(reply), flush=True)
 
             while True:
                 line = await loop.run_in_executor(None, sys.stdin.readline)
