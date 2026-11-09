@@ -1,6 +1,6 @@
 name: Release
 
-# Publishes agentexec to npm through Trusted Publishing: npm trusts this workflow, in the `npm`
+# Publishes @agentorg/exec to npm through Trusted Publishing: npm trusts this workflow, in the `npm`
 # environment, by its OIDC identity, so no token is stored anywhere, and the package carries a
 # provenance statement linking it to this repository and commit.
 
@@ -37,7 +37,7 @@ jobs:
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: package
-          path: agentexec-*.tgz
+          path: agentorg-exec-*.tgz
 
   publish:
     needs: build
@@ -55,4 +55,4 @@ jobs:
           node-version: 24
           registry-url: https://registry.npmjs.org
       - name: Publish
-        run: npm publish agentexec-*.tgz --access public --provenance
+        run: npm publish agentorg-exec-*.tgz --access public --provenance
