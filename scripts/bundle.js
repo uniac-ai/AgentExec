@@ -1,25 +1,29 @@
-// One file with nothing to install: what a host runs with `node agentexec.js`. The licences of
-// what is bundled into it go beside it.
-import { existsSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
+// Single files with nothing to install: `agentexec.js` for a host to run, and `lib.js` for one to
+// mount. The licences of what is bundled into them go beside them.
+import { copyFileSync, existsSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { build } from "esbuild";
 
-const { metafile } = await build({
-  entryPoints: ["src/main.ts"],
-  bundle: true,
-  platform: "node",
-  format: "esm",
-  target: "node22",
-  outfile: "dist/agentexec.js",
-  metafile: true,
-  banner: {
-    js: '#!/usr/bin/env node\nimport { createRequire as __createRequire } from "node:module";\nconst require = __createRequire(import.meta.url);',
-  },
-  legalComments: "none",
-});
+const bundle = (entry, outfile, banner = "") =>
+  build({
+    entryPoints: [entry],
+    bundle: true,
+    platform: "node",
+    format: "esm",
+    target: "node22",
+    outfile,
+    metafile: true,
+    banner: { js: banner },
+    legalComments: "none",
+  });
+const results = [
+  await bundle("src/main.ts", "dist/agentexec.js", "#!/usr/bin/env node"),
+  await bundle("src/lib.ts", "dist/lib.js"),
+];
+copyFileSync("out/src/lib.d.ts", "dist/lib.d.ts");
 
 const folders = new Set();
-for (const input of Object.keys(metafile.inputs)) {
+for (const input of results.flatMap(({ metafile }) => Object.keys(metafile.inputs))) {
   const match = /^(.*node_modules\/(?:@[^/]+\/)?[^/]+)\//.exec(input);
   if (match) folders.add(match[1]);
 }

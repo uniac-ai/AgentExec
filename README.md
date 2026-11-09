@@ -1,6 +1,6 @@
 # AgentExec
 
-A terminal and files for an agent: six tools over MCP on stdio. It has no telemetry, holds no credentials, and depends on nothing but Node 22.15 or later: the build is one file.
+A terminal and files for an agent: six MCP tools, over stdio or Streamable HTTP. It has no telemetry, holds no credentials, and depends on nothing but Node 22.15 or later: the build is one file.
 
 ```sh
 node dist/agentexec.js --workspace /path/to/folder --level files
@@ -9,6 +9,26 @@ node dist/agentexec.js --workspace /path/to/folder --level files
 `--level` decides which tools it offers, each level containing the one before: `read` (the default) has `read`, `list` and `search`; `files` adds `edit`; `terminal` adds `exec_command` and `write_stdin`.
 
 It acts with the rights of whoever starts it. The file tools stay inside the workspace, following links, but that is a check and not a boundary, and at `terminal` a command can reach anything those rights can. Run it somewhere that is safe for an agent to act.
+
+To serve it over HTTP, name a loopback address and set the token clients must send. MCP is at `/mcp`:
+
+```sh
+AGENTEXEC_TOKEN=... node dist/agentexec.js --workspace /path/to/folder --level files --http 127.0.0.1:8123
+```
+
+It has no TLS of its own, so it refuses any other address. To serve it elsewhere, mount it as a library behind something that does:
+
+```js
+import { createAgentExec } from "agentexec";
+
+const exec = createAgentExec({ workspace: "/path/to/folder", level: "files" });
+// In a request handler, under any path, once you have decided the caller may reach it:
+await exec.handle(request, response);
+// When you're done, which stops any command still running:
+await exec.close();
+```
+
+If you bundle it into a file of your own, don't start anything off the main thread: its search runs that same file on a worker thread.
 
 ## Tools
 
@@ -51,7 +71,7 @@ A session id is random and is given only to the call that started the command, s
 
 ## Tests
 
-`npm test` runs the conformance suite against the bundled server through the official TypeScript and Python MCP clients. The Python one needs `pip install -r requirements-test.txt`, or a Python that has it in `AGENTEXEC_PYTHON`.
+`npm test` runs the conformance suite against the bundled server through the official TypeScript MCP client, over stdio and HTTP, and the official Python one. The Python one needs `pip install -r requirements-test.txt`, or a Python that has it in `AGENTEXEC_PYTHON`.
 
 ## Licence
 
