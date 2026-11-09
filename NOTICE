@@ -1,0 +1,6 @@
+AgentExec
+Copyright 2026 AgentExec contributors
+
+The behaviour and parameters of the exec_command and write_stdin tools follow
+OpenAI Codex (https://github.com/openai/codex), Copyright 2025 OpenAI, licensed
+under the Apache License, Version 2.0. This code is a separate implementation.
