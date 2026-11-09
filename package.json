@@ -1,0 +1,35 @@
+{
+  "name": "agentexec",
+  "version": "0.0.1",
+  "private": true,
+  "description": "A terminal and files for an agent: six MCP tools over stdio",
+  "license": "Apache-2.0",
+  "type": "module",
+  "engines": {
+    "node": ">=22.15"
+  },
+  "bin": {
+    "agentexec": "dist/agentexec.js"
+  },
+  "files": [
+    "dist/agentexec.js",
+    "dist/THIRD_PARTY_LICENSES.txt",
+    "NOTICE"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.json && node scripts/bundle.js",
+    "check": "biome check .",
+    "test": "npm run build && node --test --test-timeout=60000 \"out/test/**/*.test.js\""
+  },
+  "devDependencies": {
+    "@biomejs/biome": "2.6.5",
+    "@modelcontextprotocol/client": "2.4.0",
+    "@modelcontextprotocol/server": "2.4.0",
+    "@types/node": "^22.20.5",
+    "diff": "9.0.0",
+    "esbuild": "0.28.2",
+    "ignore": "7.0.14",
+    "typescript": "^7.0.2",
+    "zod": "^4.6.7"
+  }
+}
