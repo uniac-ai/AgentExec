@@ -19,7 +19,7 @@ AGENTEXEC_TOKEN=... node dist/agentexec.js --workspace /path/to/folder --level f
 It has no TLS of its own, so it refuses any other address. To serve it elsewhere, mount it as a library behind something that does:
 
 ```js
-import { createAgentExec } from "agentexec";
+import { createAgentExec } from "@agentorg/exec";
 
 const exec = createAgentExec({ workspace: "/path/to/folder", level: "files" });
 // In a request handler, under any path, once you have decided the caller may reach it:
