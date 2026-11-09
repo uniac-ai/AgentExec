@@ -1,21 +1,28 @@
-// AgentExec: `agentexec [--workspace DIR] [--level read|files|terminal]` serves MCP over stdio.
+// AgentExec: `agentexec [--workspace DIR] [--level read|files|terminal] [--http HOST:PORT]` serves
+// MCP over stdio, or over Streamable HTTP with a bearer token.
 import { realpathSync } from "node:fs";
 import { resolve } from "node:path";
 import { parseArgs } from "node:util";
+import { isMainThread } from "node:worker_threads";
 import { StdioServerTransport } from "@modelcontextprotocol/server/stdio";
-import { serveSearch } from "./search.ts";
+import { serveHttp } from "./http.ts";
+import "./search.ts";
 import { createServer, LEVELS, type Level } from "./server.ts";
 import { Sessions } from "./sessions.ts";
-
-const VERSION = "0.0.1";
+import { VERSION } from "./version.ts";
 
 async function main() {
   const { values } = parseArgs({
-    options: { workspace: { type: "string" }, level: { type: "string" } },
+    options: {
+      workspace: { type: "string" },
+      level: { type: "string" },
+      http: { type: "string" },
+    },
   });
   const level = (values.level ?? "read") as Level;
   if (!LEVELS.includes(level)) throw new Error(`--level is one of ${LEVELS.join(", ")}.`);
   const root = realpathSync(resolve(values.workspace ?? process.cwd()));
+  if (values.http) return serveHttp(values.http, root, level);
   const sessions = new Sessions(root);
   const server = createServer(root, sessions, VERSION, level);
   let stopping = false;
@@ -32,7 +39,7 @@ async function main() {
   await server.connect(transport);
 }
 
-if (!serveSearch())
+if (isMainThread)
   main().catch((error: unknown) => {
     process.stderr.write(`${error instanceof Error ? error.message : String(error)}\n`);
     process.exit(1);

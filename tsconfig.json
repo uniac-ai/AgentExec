@@ -11,6 +11,7 @@
     "rewriteRelativeImportExtensions": true,
     "types": ["node"],
     "skipLibCheck": true,
+    "declaration": true,
     "rootDir": ".",
     "outDir": "out"
   },

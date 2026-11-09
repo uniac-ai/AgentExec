@@ -2,7 +2,8 @@
 // the commands, and is stopped at its deadline.
 import { readdirSync, readFileSync, statSync } from "node:fs";
 import { join, relative, resolve, sep } from "node:path";
-import { parentPort, Worker, workerData } from "node:worker_threads";
+import { fileURLToPath } from "node:url";
+import { isMainThread, parentPort, Worker, workerData } from "node:worker_threads";
 import ignore, { type Ignore } from "ignore";
 import { inside } from "./files.ts";
 import { ExecRefused } from "./sessions.ts";
@@ -79,21 +80,13 @@ function run(job: Job): string {
   return (more ? [...out.slice(0, limit), `… more than ${limit} matches`] : out).join("\n");
 }
 
-/** On a search thread: do the job given and answer. Says whether this is such a thread. */
-export function serveSearch(): boolean {
-  const job = workerData as Job | null;
-  if (!job?.agentexecSearch || !parentPort) return false;
-  parentPort.postMessage(run(job));
-  return true;
-}
-
 /** Search on a thread of this same file, stopped at the deadline. */
 export async function search(root: string, input: SearchInput): Promise<string> {
   const path = await inside(root, input.path ?? ".");
   return new Promise((done, failed) => {
     const workerData: Job = { ...input, path, root, agentexecSearch: true };
-    // The running file itself, which answers as a search thread (`serveSearch`).
-    const worker = new Worker(process.argv[1] as string, { workerData });
+    // This same file, whichever bundle it is in: see the end of it.
+    const worker = new Worker(fileURLToPath(import.meta.url), { workerData });
     const timer = setTimeout(() => {
       void worker.terminate();
       failed(new ExecRefused(`That search took over ${DEADLINE_MS / 1000} s, so it was stopped.`));
@@ -109,3 +102,8 @@ export async function search(root: string, input: SearchInput): Promise<string> 
     });
   });
 }
+
+// On a search thread, this module is what does the work. Whatever bundles it must not start
+// anything of its own off the main thread.
+if (!isMainThread && (workerData as Job | null)?.agentexecSearch)
+  parentPort?.postMessage(run(workerData as Job));

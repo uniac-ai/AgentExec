@@ -3,7 +3,7 @@ import { type ChildProcess, spawn } from "node:child_process";
 import { dirname, join } from "node:path";
 import { createInterface } from "node:readline";
 import { fileURLToPath } from "node:url";
-import { Client } from "@modelcontextprotocol/client";
+import { Client, StreamableHTTPClientTransport } from "@modelcontextprotocol/client";
 import { StdioClientTransport } from "@modelcontextprotocol/client/stdio";
 
 export interface Called {
@@ -93,4 +93,68 @@ async function pythonClient(workspace: string, level: string): Promise<McpClient
   };
 }
 
-export const CLIENTS = { typescript: typescriptClient, python: pythonClient };
+export const TOKEN = "conformance-token";
+
+/** The bundle over HTTP on a port of its own; the address, and the process to stop. */
+export async function startHttp(workspace: string, level: string) {
+  const child = spawn(
+    process.execPath,
+    [SERVER, "--workspace", workspace, "--level", level, "--http", "127.0.0.1:0"],
+    {
+      env: { ...environment(workspace), AGENTEXEC_TOKEN: TOKEN },
+      stdio: ["ignore", "ignore", "pipe"],
+    },
+  );
+  const url = await new Promise<string>((done, failed) => {
+    child.once("exit", (code) => failed(new Error(`The server exited ${code}.`)));
+    createInterface({ input: child.stderr as NodeJS.ReadableStream }).on("line", (line) => {
+      const found = /^Listening on (\S+)$/.exec(line);
+      if (found) done(found[1] as string);
+    });
+  });
+  return { url, child };
+}
+
+const connected = async (url: string, token: string): Promise<McpClient> => {
+  const client = new Client({ name: "conformance", version: "1.0.0" });
+  await client.connect(
+    new StreamableHTTPClientTransport(new URL(url), {
+      requestInit: { headers: { Authorization: `Bearer ${token}` } },
+    }),
+  );
+  return {
+    tools: async () => (await client.listTools()).tools.map((tool) => tool.name),
+    async call(name, args) {
+      const result = (await client.callTool({ name, arguments: args })) as {
+        content: { type: string; text?: string }[];
+        isError?: boolean;
+      };
+      const text = result.content.map((block) => block.text ?? "").join("");
+      return { text, isError: result.isError === true };
+    },
+    close: () => client.close(),
+  };
+};
+
+export { connected as connectHttp };
+
+async function httpClient(workspace: string, level: string): Promise<McpClient> {
+  const { url, child } = await startHttp(workspace, level);
+  const client = await connected(url, TOKEN);
+  return {
+    ...client,
+    close: async () => {
+      await client.close();
+      child.removeAllListeners("exit");
+      const gone = new Promise((done) => child.once("exit", done));
+      child.kill("SIGTERM");
+      await gone;
+    },
+  };
+}
+
+export const CLIENTS = {
+  typescript: typescriptClient,
+  python: pythonClient,
+  http: httpClient,
+};

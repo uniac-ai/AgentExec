@@ -1,10 +1,19 @@
 {
   "name": "agentexec",
   "version": "0.0.1",
-  "private": true,
   "description": "A terminal and files for an agent: six MCP tools over stdio",
   "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/uniac-ai/AgentExec.git"
+  },
   "type": "module",
+  "exports": {
+    ".": {
+      "types": "./dist/lib.d.ts",
+      "default": "./dist/lib.js"
+    }
+  },
   "engines": {
     "node": ">=22.15"
   },
@@ -13,6 +22,8 @@
   },
   "files": [
     "dist/agentexec.js",
+    "dist/lib.js",
+    "dist/lib.d.ts",
     "dist/THIRD_PARTY_LICENSES.txt",
     "NOTICE"
   ],
@@ -24,6 +35,7 @@
   "devDependencies": {
     "@biomejs/biome": "2.6.5",
     "@modelcontextprotocol/client": "2.4.0",
+    "@modelcontextprotocol/node": "2.1.2",
     "@modelcontextprotocol/server": "2.4.0",
     "@types/node": "^22.20.5",
     "diff": "9.0.0",
