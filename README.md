@@ -30,7 +30,7 @@ const stop = exec.onCommand((event) => console.log(event));
 await exec.close();
 ```
 
-Each command gives a `start` (its `cmd` and `workdir`), `output` as it's written (`stream` is `stdout` or `stderr`), and an `exit` (`exitCode`). Each event has the command's `id`, which is the `session_id` its answers carry. The agent's answers don't change.
+Each command gives a `start` (its `cmd`, `workdir` and `at`), `output` as it's written (`stream` is `stdout` or `stderr`, and `text`), and an `exit` (`exitCode` and `at`). Each event has the `id` its session's answers carry as `session_id`. The agent's answers don't change.
 
 If you bundle it into a file of your own, don't start anything off the main thread: its search runs that same file on a worker thread.
 
