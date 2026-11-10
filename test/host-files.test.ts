@@ -1,9 +1,11 @@
 // The workspace's files for the host itself: listed with dates, read as bytes, written whole, and
 // found by when they changed, all kept inside the workspace as the tools are.
 import assert from "node:assert/strict";
+import { execFileSync } from "node:child_process";
 import {
   chmodSync,
   existsSync,
+  lstatSync,
   mkdirSync,
   mkdtempSync,
   readdirSync,
@@ -70,6 +72,10 @@ test("a folder is listed with each entry's kind, size and date, folders first", 
   assert.equal(named("a.bin")?.modifiedAt, NEW.toISOString());
   assert.equal(named("b.txt")?.size, 4);
   assert.equal(named("b.txt")?.modifiedAt, OLD.toISOString());
+  // A link's size and date are its own, not those of what it leads to.
+  const link = lstatSync(join(workspace, "link"));
+  assert.equal(named("link")?.size, link.size);
+  assert.equal(named("link")?.modifiedAt, link.mtime.toISOString());
 
   assert.deepEqual(
     (await files.list("docs")).entries.map((entry) => entry.name),
@@ -89,7 +95,7 @@ test("a folder with more than a thousand entries gives the first thousand and sa
 });
 
 test("a file is read as bytes, a range at a time, whatever is in it", async (t) => {
-  const { files, put } = await mounted(t);
+  const { files, workspace, put } = await mounted(t);
   const content = Uint8Array.from({ length: 10 }, (_, i) => (i === 3 ? 0 : i + 65));
   put("data.bin", content, OLD);
 
@@ -104,6 +110,8 @@ test("a file is read as bytes, a range at a time, whatever is in it", async (t) 
 
   put("docs/x", "");
   await assert.rejects(files.read("docs", 0, 1), /is a folder/);
+  execFileSync("mkfifo", [join(workspace, "pipe")]);
+  await assert.rejects(files.read("pipe", 0, 1), /isn't a file that can be read/);
   await assert.rejects(files.read("missing", 0, 1), /No such file or folder/);
   for (const [offset, length] of [
     [-1, 1],
@@ -111,7 +119,7 @@ test("a file is read as bytes, a range at a time, whatever is in it", async (t) 
     [0, 1024 * 1024 + 1],
     [0.5, 1],
   ] as const)
-    await assert.rejects(files.read("data.bin", offset, length), /A read starts at 0 or later/);
+    await assert.rejects(files.read("data.bin", offset, length), /takes 1 to 1,048,576 bytes/);
   assert.equal((await files.read("data.bin", 0, 1024 * 1024)).bytes.length, 10);
 });
 
@@ -132,7 +140,7 @@ test("nothing outside the workspace is listed, read or written, by a path or thr
 });
 
 test("the files that changed after a time are found wherever they are, the newest first", async (t) => {
-  const { files, put } = await mounted(t);
+  const { files, workspace, put } = await mounted(t);
   put("old.txt", "x", OLD);
   put("new.txt", "12345", NEW);
   put("deep/er/newer.txt", "x", new Date(NEW.getTime() + 1000));
@@ -141,6 +149,7 @@ test("the files that changed after a time are found wherever they are, the newes
   put("run.log", "x", NEW);
   put("node_modules/pkg/index.js", "x", NEW);
   put(".git/HEAD", "x", NEW);
+  symlinkSync(join(workspace, "new.txt"), join(workspace, "link"));
 
   const { changes, more } = await files.changed(new Date("2025-01-01T00:00:00.000Z"));
   assert.equal(more, false);
@@ -162,18 +171,35 @@ test("the files that changed after a time are found wherever they are, the newes
   await assert.rejects(files.changed(new Date("not a time")), /isn't a time/);
 });
 
-test("more than a thousand changed files gives a thousand and says so", async (t) => {
+test("asking again from the newest file's own date doesn't bring it back", async (t) => {
+  const { files, workspace, put } = await mounted(t);
+  put("a.txt", "x");
+  // A time between two milliseconds, where the file system keeps one.
+  utimesSync(join(workspace, "a.txt"), 1_900_000_000.0004, 1_900_000_000.0004);
+  const [found] = (await files.changed(OLD)).changes;
+  assert.equal(found?.path, "a.txt");
+  assert.deepEqual((await files.changed(new Date(found?.modifiedAt as string))).changes, []);
+});
+
+test("of more than a thousand changed files it gives the newest thousand, and says so", async (t) => {
   const { files, put } = await mounted(t);
-  for (let i = 0; i < 1001; i++) put(`many/f${i}`, "", NEW);
+  const at = (i: number) => new Date(NEW.getTime() + i * 1000);
+  // Spread over folders, so no order of walking them finds the newest thousand first.
+  for (let i = 0; i < 1200; i++) put(`${i % 7}/f${i}`, "", at(i));
   const { changes, more } = await files.changed(OLD);
-  assert.equal(changes.length, 1000);
   assert.equal(more, true);
+  assert.deepEqual(
+    changes.map((change) => change.path),
+    Array.from({ length: 1000 }, (_, n) => 1199 - n).map((i) => `${i % 7}/f${i}`),
+  );
+  assert.equal(changes[0]?.modifiedAt, at(1199).toISOString());
 });
 
 test("an upload is in place only once it is finished, whole, and keeps the mode of what it replaces", async (t) => {
   const { files, workspace, put } = await mounted(t);
   put("tool.sh", "before");
-  chmodSync(join(workspace, "tool.sh"), 0o750);
+  // A mode the usual umask would cut, were the new file only opened with it.
+  chmodSync(join(workspace, "tool.sh"), 0o777);
 
   const upload = await files.upload("tool.sh");
   await upload.write(new Uint8Array([0, 255, 1]));
@@ -186,7 +212,7 @@ test("an upload is in place only once it is finished, whole, and keeps the mode 
     [...readFileSync(join(workspace, "tool.sh"))],
     [0, 255, 1, ...new TextEncoder().encode("rest")],
   );
-  assert.equal(statSync(join(workspace, "tool.sh")).mode & 0o777, 0o750);
+  assert.equal(statSync(join(workspace, "tool.sh")).mode & 0o777, 0o777);
   assert.deepEqual(temporaries(workspace), []);
   await assert.rejects(upload.write(new Uint8Array(1)), /has ended/);
   await assert.rejects(upload.finish(), /has ended/);
@@ -199,6 +225,16 @@ test("an upload is in place only once it is finished, whole, and keeps the mode 
 
   const empty = await files.upload("empty");
   assert.equal((await empty.finish()).size, 0);
+
+  // Parts given without waiting for each still land in the order they were given.
+  const hurried = await files.upload("hurried");
+  const parts = Array.from({ length: 50 }, (_, i) => new Uint8Array(3).fill(i));
+  for (const part of parts) void hurried.write(part);
+  await hurried.finish();
+  assert.deepEqual(
+    [...readFileSync(join(workspace, "hurried"))],
+    parts.flatMap((part) => [...part]),
+  );
 });
 
 test("an upload given up, or left open when the host closes, leaves what was there", async (t) => {
@@ -218,6 +254,12 @@ test("an upload given up, or left open when the host closes, leaves what was the
   assert.equal(existsSync(join(workspace, "never.txt")), false);
   assert.deepEqual(temporaries(workspace), []);
   await assert.rejects(left.finish(), /has ended/);
+
+  // One still opening when the host closes is refused, and leaves nothing either.
+  const opening = files.upload("late.txt");
+  await exec.close();
+  await assert.rejects(opening, /closed before that upload began/);
+  assert.deepEqual(temporaries(workspace), []);
 });
 
 test("an upload is refused onto a folder, into a folder that isn't there, and at the read level", async (t) => {

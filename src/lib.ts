@@ -30,8 +30,9 @@ export interface FileChange {
   size: number;
   modifiedAt: string;
 }
+/** The files that changed after a time. */
 export interface FileChanges {
-  /** The newest first. */
+  /** The newest thousand, the newest first. */
   changes: FileChange[];
   /** Whether there were more than these. */
   more: boolean;
@@ -52,8 +53,9 @@ export interface HostFiles {
   /** A folder's entries, folders first, the first thousand. `more` says there were others. */
   list(path?: string): Promise<{ entries: FileEntry[]; more: boolean }>;
   /**
-   * Up to `length` bytes of a file from `offset`, at most 1,048,576 a time, with its whole size
-   * and its date. Fewer bytes come back at its end, and none past it.
+   * `length` bytes of a file from `offset`, with its whole size and its date. Fewer bytes come
+   * back at its end, and none past it. A `length` over 1,048,576 is refused, as is anything that
+   * isn't a file.
    */
   read(
     path: string,
@@ -61,18 +63,22 @@ export interface HostFiles {
     length: number,
   ): Promise<{ bytes: Uint8Array; size: number; modifiedAt: string }>;
   /**
-   * The files modified after a time, the newest first, up to a thousand. It skips what the search
-   * skips, and a file that was removed isn't one of them.
+   * The files modified after a time, in whole milliseconds: the newest thousand, the newest first.
+   * It skips what `.gitignore` files ignore, `.git`, `node_modules` and links, and a file that was
+   * removed isn't one of them.
    */
   changed(since: Date): Promise<FileChanges>;
-  /** Start writing a file. Refused at the `read` level. */
+  /** Start writing a file, in a folder that is there. Refused at the `read` level. */
   upload(path: string): Promise<FileUpload>;
 }
 
 export interface AgentExecOptions {
   /** The folder its file tools are kept to, and where commands start. */
   workspace: string;
-  /** Which tools it offers, each level containing the one before. `read` by default. */
+  /**
+   * Which tools it offers, each level containing the one before, and whether the host may write
+   * files: not at `read`, which is the default.
+   */
   level?: "read" | "files" | "terminal";
 }
 

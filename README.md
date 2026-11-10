@@ -46,9 +46,9 @@ await upload.finish();
 ```
 
 - `list` gives a folder's first thousand entries, folders first; `more` says there were others. `kind` is `file`, `folder` or `link`, and a link's size and date are its own.
-- `read` gives up to 1,048,576 bytes from an offset, with the file's whole size, so a large file is read a range at a time.
-- `changed` gives the files modified after a time, the newest first, up to a thousand. It skips what `search` skips, and a file that was removed isn't one of them.
-- `upload` writes a file a part at a time. Nothing is at its path until `finish` puts it there whole, over any file that was there and keeping that file's mode; `abort` gives up. It makes no folders, and it is refused at the `read` level. `exec.close()` gives up any upload still open.
+- `read` gives a range of a file's bytes from an offset, with the file's whole size, so a large file is read a range at a time. A range over 1,048,576 bytes is refused, as is anything that isn't a file.
+- `changed` gives the files modified after a time, in whole milliseconds: the newest thousand, the newest first, and `more` says there were others. It skips what `.gitignore` files ignore, `.git`, `node_modules` and links, and a file that was removed isn't one of them.
+- `upload` writes a file a part at a time. Nothing is at its path until `finish` puts it there whole, over any file that was there and keeping that file's mode; `abort` gives up. It makes no folders, and it is refused at the `read` level, which otherwise decides only the tools. Until it is finished its part-written file sits beside its path as `.agentexec-…`, where a listing, and the agent, can see it. `exec.close()` gives up any upload still open.
 
 They stay inside the workspace as the tools do, and refuse with an error whose message says why.
 

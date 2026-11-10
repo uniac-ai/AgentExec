@@ -60,7 +60,8 @@ function eachFile(start: string, visit: (file: string) => boolean) {
       );
       if (ignored) continue;
       try {
-        if (entry.isDirectory() ? !walk(path, here) : entry.isFile() && !visit(path)) return false;
+        const carryOn = entry.isDirectory() ? walk(path, here) : !entry.isFile() || visit(path);
+        if (!carryOn) return false;
       } catch {
         // Unreadable: not something to report on.
       }
@@ -103,19 +104,31 @@ function searched(job: SearchJob): string {
 
 function changed(job: ChangedJob): FileChanges {
   const changes: FileChange[] = [];
+  let more = false;
+  /** Keep the newest thousand of those found so far. */
+  const newest = () => {
+    changes.sort(
+      (a, b) => b.modifiedAt.localeCompare(a.modifiedAt) || a.path.localeCompare(b.path),
+    );
+    if (changes.length <= MAX_CHANGES) return;
+    more = true;
+    changes.length = MAX_CHANGES;
+  };
   eachFile(job.root, (file) => {
-    const { mtime, mtimeMs, size } = statSync(file);
-    if (mtimeMs > job.since)
+    const { mtime, size } = statSync(file);
+    // In whole milliseconds, as the date in the answer is: asking again from a file's own date
+    // doesn't bring it back.
+    if (mtime.getTime() > job.since) {
       changes.push({
         path: relative(job.root, file).split(sep).join("/"),
         size,
         modifiedAt: mtime.toISOString(),
       });
-    return changes.length <= MAX_CHANGES;
+      if (changes.length >= 2 * MAX_CHANGES) newest();
+    }
+    return true;
   });
-  const more = changes.length > MAX_CHANGES;
-  changes.length = Math.min(changes.length, MAX_CHANGES);
-  changes.sort((a, b) => b.modifiedAt.localeCompare(a.modifiedAt) || a.path.localeCompare(b.path));
+  newest();
   return { changes, more };
 }
 
@@ -145,7 +158,7 @@ export async function search(root: string, input: SearchInput): Promise<string> 
   return onThread({ ...input, path, root, agentexecSearch: true }, "That search");
 }
 
-/** The files in the workspace modified after a time, the newest first, up to a thousand. */
+/** The newest thousand of the files in the workspace modified after a time, the newest first. */
 export function changedSince(root: string, since: number): Promise<FileChanges> {
   return onThread({ root, since, agentexecSearch: true }, "Looking for what changed");
 }

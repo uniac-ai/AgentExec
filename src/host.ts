@@ -9,11 +9,13 @@ import { changedSince } from "./search.ts";
 import type { Level } from "./server.ts";
 import { ExecRefused } from "./sessions.ts";
 
-/** The most one read returns. */
+/** The most one read takes. */
 export const MAX_READ_BYTES = 1024 * 1024;
 
 export function createHostFiles(root: string, level: Level) {
   const uploads = new Set<FileUpload>();
+  /** How many times the host has closed, for an upload to see that it did while it was opening. */
+  let closes = 0;
 
   const files: HostFiles = {
     list: (path = ".") =>
@@ -43,15 +45,21 @@ export function createHostFiles(root: string, level: Level) {
 
     read: (path, offset, length) =>
       refusing(async () => {
-        const whole = (value: number) => Number.isSafeInteger(value);
-        if (!whole(offset) || offset < 0 || !whole(length) || length < 1 || length > MAX_READ_BYTES)
-          throw new ExecRefused(
-            `A read starts at 0 or later and takes 1 to ${MAX_READ_BYTES} bytes.`,
-          );
-        const file = await open(await inside(root, path), "r");
+        if (
+          !Number.isSafeInteger(offset) ||
+          offset < 0 ||
+          !Number.isSafeInteger(length) ||
+          length < 1 ||
+          length > MAX_READ_BYTES
+        )
+          throw new ExecRefused("A read starts at 0 or later and takes 1 to 1,048,576 bytes.");
+        const real = await inside(root, path);
+        const found = await stat(real);
+        if (found.isDirectory()) throw new ExecRefused(`${path} is a folder.`);
+        // Opening anything else, a pipe say, could wait for good.
+        if (!found.isFile()) throw new ExecRefused(`${path} isn't a file that can be read.`);
+        const file = await open(real, "r");
         try {
-          const found = await file.stat();
-          if (found.isDirectory()) throw new ExecRefused(`${path} is a folder.`);
           const bytes = Buffer.alloc(Math.max(0, Math.min(length, found.size - offset)));
           const { bytesRead } = await file.read(bytes, 0, bytes.length, offset);
           return {
@@ -74,6 +82,7 @@ export function createHostFiles(root: string, level: Level) {
     upload: (path) =>
       refusing(async () => {
         if (level === "read") throw new ExecRefused("Files here can be read, not written.");
+        const opening = closes;
         const target = await inside(root, path);
         const before = await stat(target).catch((error: NodeJS.ErrnoException) => {
           if (error.code === "ENOENT") return undefined;
@@ -82,48 +91,58 @@ export function createHostFiles(root: string, level: Level) {
         if (before?.isDirectory()) throw new ExecRefused(`${path} is a folder.`);
         // It makes no folders: the one it goes in has to be there.
         await stat(dirname(target));
-        // Written beside it and moved into place, keeping the mode of a file it replaces.
+        // Written beside it and moved into place whole.
         const temporary = join(dirname(target), `.agentexec-${randomBytes(6).toString("hex")}`);
-        const file = await open(temporary, "wx", before ? before.mode & 0o7777 : 0o666);
+        const file = await open(temporary, "wx");
+        const discard = async () => {
+          await file.close().catch(() => {});
+          await rm(temporary, { force: true });
+        };
         let ended = false;
         let written: Promise<unknown> = Promise.resolve();
-        const end = async () => {
+        const end = () => {
+          if (ended) throw new ExecRefused("That upload has ended.");
           ended = true;
           uploads.delete(upload);
-          await written.catch(() => {});
-          await file.close();
-        };
-        const live = () => {
-          if (ended) throw new ExecRefused("That upload has ended.");
         };
         const upload: FileUpload = {
           write: (bytes) =>
             refusing(async () => {
-              live();
-              // One part at a time, in the order they were given.
-              written = written.then(() => file.write(bytes));
+              if (ended) throw new ExecRefused("That upload has ended.");
+              // One part at a time, in the order they were given, each written in full.
+              written = written.then(() => file.appendFile(bytes));
               await written;
             }),
           finish: () =>
             refusing(async () => {
-              live();
-              await end();
+              end();
               try {
                 await written;
+                await file.close();
                 await rename(temporary, target);
               } catch (error) {
-                await rm(temporary, { force: true });
+                await discard();
                 throw error;
               }
               const after = await stat(target);
               return { size: after.size, modifiedAt: after.mtime.toISOString() };
             }),
-          abort: async () => {
-            if (ended) return;
-            await end();
-            await rm(temporary, { force: true });
-          },
+          abort: () =>
+            refusing(async () => {
+              if (ended) return;
+              end();
+              await written.catch(() => {});
+              await discard();
+            }),
         };
+        try {
+          // The mode of the file it replaces, which opening with it would let the umask cut.
+          if (before) await file.chmod(before.mode & 0o7777);
+          if (closes !== opening) throw new ExecRefused("It closed before that upload began.");
+        } catch (error) {
+          await discard();
+          throw error;
+        }
         uploads.add(upload);
         return upload;
       }),
@@ -131,8 +150,9 @@ export function createHostFiles(root: string, level: Level) {
 
   return {
     files,
-    /** Give up every upload still open. */
+    /** Give up every upload still open, and any that is opening. */
     close: async () => {
+      closes++;
       await Promise.all([...uploads].map((upload) => upload.abort()));
     },
   };
