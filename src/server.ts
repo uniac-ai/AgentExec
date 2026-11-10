@@ -1,9 +1,16 @@
-// The six tools over MCP.
+// The seven tools over MCP.
 import { McpServer } from "@modelcontextprotocol/server";
 import { z } from "zod";
 import { createFiles } from "./files.ts";
 import { search } from "./search.ts";
-import { type Answer, ExecRefused, formatAnswer, type Sessions } from "./sessions.ts";
+import {
+  type Answer,
+  ExecRefused,
+  formatAnswer,
+  formatSessions,
+  listing,
+  type Sessions,
+} from "./sessions.ts";
 
 const text = (value: string) => ({ content: [{ type: "text" as const, text: value }] });
 const refused = (error: unknown) => {
@@ -65,9 +72,9 @@ export function createServer(root: string, sessions: Sessions, version: string, 
       "write_stdin",
       {
         description:
-          "Types into a running command and returns what it wrote since. With no chars, waits and returns what it has written. A Ctrl-C character (\\u0003) interrupts it; Ctrl-D (\\u0004) ends its input.",
+          "Types into a running command and returns what it wrote since. With no chars, waits and returns what it has written. A Ctrl-C character (\\u0003) interrupts it; Ctrl-D (\\u0004) ends its input. It also reaches a shell a person opened, by its id from list_sessions: there these are keys, what you type joins anything already typed, and Ctrl-D at its prompt closes it. Once an answer has given a session's exit code, that session is refused.",
         inputSchema: {
-          session_id: z.string().min(1).describe("From exec_command's answer."),
+          session_id: z.string().min(1).describe("From exec_command's answer, or list_sessions."),
           chars: z.string().optional().describe("What to type; include \\n to press Enter."),
           yield_time_ms: YieldTime.describe(
             "How long to wait: with chars 250 to 30000, by default 250; with none 5000 to 30000.",
@@ -78,6 +85,29 @@ export function createServer(root: string, sessions: Sessions, version: string, 
         annotations: { destructiveHint: true },
       },
       (input) => answering(() => sessions.write(input)),
+    );
+    server.registerTool(
+      "list_sessions",
+      {
+        description:
+          "Lists the sessions here, running or lately ended: each command exec_command started, and each shell a person opened. Gives each one's session_id for write_stdin, who started it, since when, its exit code and the start of its command.",
+        outputSchema: {
+          sessions: z.array(
+            z.object({
+              session_id: z.string(),
+              started_by: z.enum(["agent", "person"]).describe("A person's is their own shell."),
+              since: z.string().describe("When it started."),
+              exit_code: z.number().nullable().describe("Null while it is still running."),
+              cmd: z.string().describe("Its first line, or the start of it."),
+            }),
+          ),
+        },
+        annotations: READ_ONLY,
+      },
+      () => {
+        const listed = listing(sessions.list());
+        return { ...text(formatSessions(listed)), structuredContent: { sessions: listed } };
+      },
     );
   }
   server.registerTool(

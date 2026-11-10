@@ -133,10 +133,33 @@ for (const [name, connect] of Object.entries(CLIENTS)) {
       await stdin({ session_id, chars: "\u0004", yield_time_ms: 5000 });
   });
 
+  test(`${name}: list_sessions gives a command's id, and write_stdin takes it`, async (t) => {
+    const { exec, stdin, client } = await setup(t);
+    const none = await client.call("list_sessions", {});
+    assert.deepEqual(none, { text: "No sessions.", isError: false });
+    await exec({ cmd: "cat", yield_time_ms: 250 });
+    const listed = await client.call("list_sessions", {});
+    assert.equal(listed.isError, false);
+    const match =
+      /^session_id: (s_\S+)\nstarted_by: agent\nsince: \S+\nexit_code: running\ncmd: cat$/.exec(
+        listed.text,
+      );
+    assert.ok(match, listed.text);
+    const session_id = match[1] as string;
+    assert.equal(
+      (await stdin({ session_id, chars: "found\n\u0004", yield_time_ms: 5000 })).text,
+      "found\n",
+    );
+    assert.match((await client.call("list_sessions", {})).text, /\nexit_code: 0\ncmd: cat$/);
+  });
+
   for (const [level, tools] of [
     ["read", ["list", "read", "search"]],
     ["files", ["edit", "list", "read", "search"]],
-    ["terminal", ["edit", "exec_command", "list", "read", "search", "write_stdin"]],
+    [
+      "terminal",
+      ["edit", "exec_command", "list", "list_sessions", "read", "search", "write_stdin"],
+    ],
   ] as const)
     test(`${name}: the ${level} level offers its tools and no others`, async (t) => {
       const { client } = await setup(t, level);
