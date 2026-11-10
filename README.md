@@ -32,7 +32,27 @@ await exec.close();
 
 Each command gives a `start` (its `cmd`, `workdir` and `at`), `output` as it's written (`stream` is `stdout` or `stderr`, and `text`), and an `exit` (`exitCode` and `at`). Each event has the `id` its session's answers carry as `session_id`. The agent's answers don't change.
 
-If you bundle it into a file of your own, don't start anything off the main thread: its search runs that same file on a worker thread.
+The host can also reach the workspace's files itself, in bytes and with dates, for a person's file window or anything else the tools' text doesn't serve. None of this is a tool, and the agent's tools don't change:
+
+```js
+const { entries, more } = await exec.files.list("src");
+// [{ name: "lib", kind: "folder", size: 96, modifiedAt: "2026-01-02T03:04:05.000Z" }, ...]
+const { bytes, size, modifiedAt } = await exec.files.read("logo.png", 0, 1024 * 1024);
+const { changes } = await exec.files.changed(new Date(Date.now() - 60_000));
+// [{ path: "src/lib/a.ts", size: 812, modifiedAt: "..." }, ...]
+const upload = await exec.files.upload("data/in.csv");
+await upload.write(part);
+await upload.finish();
+```
+
+- `list` gives a folder's first thousand entries, folders first; `more` says there were others. `kind` is `file`, `folder` or `link`, and a link's size and date are its own.
+- `read` gives a range of a file's bytes from an offset, with the file's whole size, so a large file is read a range at a time. A range over 1,048,576 bytes is refused, as is anything that isn't a file.
+- `changed` gives the files modified after a time, in whole milliseconds: the newest thousand, the newest first, and `more` says there were others. It skips what `.gitignore` files ignore, `.git`, `node_modules` and links, and a file that was removed isn't one of them.
+- `upload` writes a file a part at a time. Nothing is at its path until `finish` puts it there whole, over any file that was there and keeping that file's mode; `abort` gives up. It makes no folders, and it is refused at the `read` level, which otherwise decides only the tools. Until it is finished its part-written file sits beside its path as `.agentexec-…`, where a listing, and the agent, can see it. `exec.close()` gives up any upload still open.
+
+They stay inside the workspace as the tools do, and refuse with an error whose message says why.
+
+If you bundle it into a file of your own, don't start anything off the main thread: its search, and `changed`, run that same file on a worker thread.
 
 ## Tools
 

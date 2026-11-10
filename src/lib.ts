@@ -5,6 +5,7 @@ import { realpathSync } from "node:fs";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { resolve } from "node:path";
 import { NodeStreamableHTTPServerTransport } from "@modelcontextprotocol/node";
+import { createHostFiles } from "./host.ts";
 import { createServer } from "./server.ts";
 import { Sessions } from "./sessions.ts";
 import { VERSION } from "./version.ts";
@@ -15,10 +16,69 @@ export type CommandEvent =
   | { type: "output"; id: string; stream: "stdout" | "stderr"; text: string }
   | { type: "exit"; id: string; exitCode: number; at: string };
 
+/** One entry of a folder. A link is not followed: its size and date are its own. */
+export interface FileEntry {
+  name: string;
+  kind: "file" | "folder" | "link";
+  size: number;
+  modifiedAt: string;
+}
+
+/** A file that changed, by its path from the workspace. */
+export interface FileChange {
+  path: string;
+  size: number;
+  modifiedAt: string;
+}
+/** The files that changed after a time. */
+export interface FileChanges {
+  /** The newest thousand, the newest first. */
+  changes: FileChange[];
+  /** Whether there were more than these. */
+  more: boolean;
+}
+
+/** A file being written a part at a time. Nothing is at its path until `finish`. */
+export interface FileUpload {
+  /** Add the next part. */
+  write(bytes: Uint8Array): Promise<void>;
+  /** Put the file in place, whole, over any that was there. */
+  finish(): Promise<{ size: number; modifiedAt: string }>;
+  /** Give up, leaving what was there. */
+  abort(): Promise<void>;
+}
+
+/** The workspace's files for the host itself. Paths are from the workspace, or absolute in it. */
+export interface HostFiles {
+  /** A folder's entries, folders first, the first thousand. `more` says there were others. */
+  list(path?: string): Promise<{ entries: FileEntry[]; more: boolean }>;
+  /**
+   * `length` bytes of a file from `offset`, with its whole size and its date. Fewer bytes come
+   * back at its end, and none past it. A `length` over 1,048,576 is refused, as is anything that
+   * isn't a file.
+   */
+  read(
+    path: string,
+    offset: number,
+    length: number,
+  ): Promise<{ bytes: Uint8Array; size: number; modifiedAt: string }>;
+  /**
+   * The files modified after a time, in whole milliseconds: the newest thousand, the newest first.
+   * It skips what `.gitignore` files ignore, `.git`, `node_modules` and links, and a file that was
+   * removed isn't one of them.
+   */
+  changed(since: Date): Promise<FileChanges>;
+  /** Start writing a file, in a folder that is there. Refused at the `read` level. */
+  upload(path: string): Promise<FileUpload>;
+}
+
 export interface AgentExecOptions {
   /** The folder its file tools are kept to, and where commands start. */
   workspace: string;
-  /** Which tools it offers, each level containing the one before. `read` by default. */
+  /**
+   * Which tools it offers, each level containing the one before, and whether the host may write
+   * files: not at `read`, which is the default.
+   */
   level?: "read" | "files" | "terminal";
 }
 
@@ -30,7 +90,13 @@ export interface AgentExec {
    * far. Returns the way to stop listening. What a command writes still reaches the agent.
    */
   onCommand(listener: (event: CommandEvent) => void): () => void;
-  /** Stop every command still running. */
+  /**
+   * The workspace's files for the host itself, in bytes and with dates, kept inside the workspace
+   * as the tools are. None of it is a tool, and the agent's tools don't change. Each refuses with
+   * an error whose message says why.
+   */
+  files: HostFiles;
+  /** Stop every command still running, and give up every upload still open. */
   close(): Promise<void>;
 }
 
@@ -50,6 +116,7 @@ export function createAgentExec(options: AgentExecOptions): AgentExec {
         // A listener that fails doesn't stop the command or the others.
       }
   });
+  const host = createHostFiles(root, level);
   return {
     async handle(request, response, body) {
       const server = createServer(root, sessions, VERSION, level);
@@ -65,6 +132,9 @@ export function createAgentExec(options: AgentExecOptions): AgentExec {
       listeners.add(listener);
       return () => void listeners.delete(listener);
     },
-    close: () => sessions.stopAll(),
+    files: host.files,
+    async close() {
+      await Promise.all([sessions.stopAll(), host.close()]);
+    },
   };
 }
