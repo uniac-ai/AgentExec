@@ -48,8 +48,8 @@ await exec.terminals.stop(id);
 
 - `list` gives every terminal, the oldest first: those running and the last 64 that ended, which also have `exitCode` and `endedAt`. `output` is the last 65,536 characters each has written, for someone who comes late. `by` is `agent` or `person`: the way in it came, and nothing more.
 - `open` starts a person's login shell in the workspace and gives its id. It needs the `terminal` level, and a terminal device to run on: AgentExec brings none, so the host passes one as `pty`, a function in the shape of `spawn` from [node-pty](https://github.com/microsoft/node-pty). Without it `open` is refused and everything else works.
-- `write` types into any running terminal, the agent's commands included. `resize` is for a shell. `stop` ends one: an interrupt, or a hangup for a shell, then a kill a second later.
-- The agent sees a person's shell in `list_sessions`, reads it and types into it with `write_stdin`. What a person's shell shows is the agent's to read.
+- `write` types into any running terminal, the agent's commands included. `resize` is for a shell. `stop` ends one: an interrupt, or a hangup for a shell, then a kill a second later. A program in a shell that ignores the hangup outlives it.
+- The agent sees a person's shell in `list_sessions`, reads it and types into it with `write_stdin`. What a person's shell shows is the agent's to read, and whatever that shell is signed in to, the agent can type into.
 
 The host can also reach the workspace's files itself, in bytes and with dates, for a person's file window or anything else the tools' text doesn't serve. None of this is a tool, and the agent's tools don't change:
 
@@ -78,7 +78,7 @@ If you bundle it into a file of your own, don't start anything off the main thre
 | Tool            | What it does                                                                                                                                                                                  |
 | --------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `exec_command`  | Runs `cmd` in a login shell, in `workdir` or the workspace. Waits `yield_time_ms` (250 to 30000, default 10000), then answers. A command still running keeps running and gets a `session_id`. |
-| `write_stdin`   | Types `chars` into a running command and answers with what it wrote since. With no `chars`, waits (5000 to 30000 ms, default 5000) for more. `\u0003` interrupts it, `\u0004` ends its input. |
+| `write_stdin`   | Types `chars` into a running session and answers with what it wrote since. With no `chars`, waits (5000 to 30000 ms, default 5000) for more. `\u0003` interrupts it, `\u0004` ends its input. |
 | `list_sessions` | The terminals here, running or lately ended: each one's `session_id`, who started it (`agent` or `person`), since when, its exit code or `running`, and its command.                          |
 | `read`          | A text file as numbered lines, from `offset` (1) for `limit` lines (2000).                                                                                                                    |
 | `list`          | A folder: folders end in `/`, files give their size in bytes.                                                                                                                                 |
@@ -103,11 +103,13 @@ what it wrote
 
 ## Sessions
 
-Every command is a session from its start, and so is a shell a person opened through a host. `list_sessions` gives them all, so whoever can call the tools can see every session and type into any that is running: agents sharing one server aren't kept apart. A session stays listed after it ends, until 64 others have ended after it.
+A session is what the library calls a terminal. Every command is one from its start, and so is a shell a person opened through a host. `list_sessions` gives them all, so whoever can call the tools can see every session and type into any that is running: agents sharing one server aren't kept apart. It shows a command as its first line, or its first 200 characters.
 
-`write_stdin` reaches a session by its id while it runs, and once more after, for what it wrote last and its exit code. A person's shell is on a terminal device, so what is typed into it goes in as it is, and its text has the shell's prompts and colours in it.
+`write_stdin` reaches a session by its id while it runs. If no answer has carried its exit code yet, it reaches it once more after it ends, for what it wrote last and that code. A person's shell is on a terminal device, so what is typed into it goes in as keys: it joins anything already typed there, Ctrl-D at its prompt closes it, and its text has the shell's prompts and colours in it.
 
-At most 64 run at once, a person's shells among them; past that a new one is refused, and none is evicted. Closing the connection stops every one still running.
+Once 64 have ended, each that ends takes one off the list: the earliest whose exit code an answer has carried, so one nobody has read stays while there is another to drop.
+
+At most 64 run at once, a person's shells among them; past that a new one is refused, and none is evicted. Over stdio, closing the connection stops every one still running. Over HTTP and in a host they run until it stops.
 
 ## Differences from Codex
 
@@ -117,7 +119,7 @@ At most 64 run at once, a person's shells among them; past that a new one is ref
 - A poll waits at most 30 seconds rather than 300, so that one call stays inside a host's own time limit.
 - Sessions are named by random strings, not small numbers.
 
-`list_sessions` is AgentExec's own.
+`list_sessions` is AgentExec's own, and so is a person's shell among the sessions, which is on a terminal device.
 
 ## Tests
 

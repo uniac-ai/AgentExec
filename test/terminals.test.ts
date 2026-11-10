@@ -16,7 +16,7 @@ type Options = import("../src/lib.ts").AgentExecOptions;
 type CommandEvent = import("../src/lib.ts").CommandEvent;
 const LIBRARY = join(dirname(fileURLToPath(import.meta.url)), "..", "..", "dist", "lib.js");
 
-// A plain shell and an empty home, so nothing of this machine's profile runs.
+// A plain shell and an empty home, so nothing of the user's own profile runs.
 process.env.SHELL = "/bin/bash";
 process.env.HOME = realpathSync(mkdtempSync(join(tmpdir(), "agentexec-home-")));
 test.after(() => rmSync(process.env.HOME as string, { recursive: true, force: true }));
@@ -171,6 +171,30 @@ test("a person types into the agent's command, and stops one", async (t) => {
   await exec.terminals.stop(sleep);
   assert.equal(exec.terminals.list()[1]?.exitCode, 130);
   await exec.terminals.stop(sleep);
+
+  // One that ignores the interrupt is killed.
+  const deaf = sessionOf(
+    (await client.call("exec_command", { cmd: "trap '' INT; sleep 100", yield_time_ms: 250 })).text,
+  );
+  await exec.terminals.stop(deaf);
+  await until(() => exited(deaf) !== undefined, "the kill");
+  assert.equal(exec.terminals.list()[2]?.exitCode, 137);
+});
+
+test("a terminal can be acted on from the moment it is heard starting", async (t) => {
+  const pty = pythonPty();
+  const { exec, written } = await mounted(t, { pty: pty.open });
+  exec.onCommand((event) => {
+    if (event.type !== "start") return;
+    exec.terminals.resize(event.id, 132, 50);
+    exec.terminals.write(event.id, "echo typed-$((1 + 1))-at-once\n");
+  });
+  const id = exec.terminals.open({ columns: 80, rows: 24 });
+  assert.deepEqual(pty.sizes, [
+    [80, 24],
+    [132, 50],
+  ]);
+  await until(() => written(id).includes("typed-2-at-once"), "what was typed at its start");
 });
 
 test("a terminal keeps the end of what it wrote", async (t) => {
@@ -187,6 +211,17 @@ test("what can't be done says why", async (t) => {
   assert.throws(() => plain.exec.terminals.open({ columns: 80, rows: 24 }), /terminal device/);
   const files = await mounted(t, { level: "files", pty: pty.open });
   assert.throws(() => files.exec.terminals.open({ columns: 80, rows: 24 }), /terminal level/);
+
+  const none = await mounted(t, {
+    pty() {
+      throw new Error("no terminal devices are left");
+    },
+  });
+  assert.throws(
+    () => none.exec.terminals.open({ columns: 80, rows: 24 }),
+    /The shell didn't start: no terminal devices are left/,
+  );
+  assert.deepEqual(none.exec.terminals.list(), []);
 
   const { exec, client } = await mounted(t, { pty: pty.open });
   for (const [columns, rows] of [

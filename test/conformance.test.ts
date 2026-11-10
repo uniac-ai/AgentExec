@@ -147,12 +147,8 @@ for (const [name, connect] of Object.entries(CLIENTS)) {
     assert.ok(match, listed.text);
     const session_id = match[1] as string;
     assert.equal(
-      (await stdin({ session_id, chars: "found\n", yield_time_ms: 2000 })).text,
+      (await stdin({ session_id, chars: "found\n\u0004", yield_time_ms: 5000 })).text,
       "found\n",
-    );
-    assert.equal(
-      (await stdin({ session_id, chars: "\u0004", yield_time_ms: 5000 })).exit_code,
-      "0",
     );
     assert.match((await client.call("list_sessions", {})).text, /\nexit_code: 0\ncmd: cat$/);
   });

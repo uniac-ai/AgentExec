@@ -63,11 +63,18 @@ export interface HostTerminals {
   write(id: string, text: string): void;
   /** Give a shell's terminal device a new size. A command has none. */
   resize(id: string, columns: number, rows: number): void;
-  /** End a terminal: an interrupt, or a hangup for a shell, then a kill a second later. */
+  /**
+   * End a terminal: an interrupt, or a hangup for a shell, then a kill a second later. It
+   * resolves once the terminal has ended or been killed, and one killed is listed as ended a
+   * moment after. A program in a shell that ignores the hangup outlives it.
+   */
   stop(id: string): Promise<void>;
 }
 
-/** A process on a terminal device, as much of one as is used. */
+/**
+ * A process on a terminal device, as much of one as is used.
+ * Its exit comes after its last data.
+ */
 export interface Pty {
   onData(listener: (data: string) => void): unknown;
   onExit(listener: (exit: { exitCode: number; signal?: number }) => void): unknown;

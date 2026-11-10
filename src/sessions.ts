@@ -16,10 +16,12 @@ export const MIN_POLL_MS = 5_000;
 export const WRITE_YIELD_MS = 250;
 /** Terminals running at once; one past it is refused, and none is ever evicted. */
 export const MAX_RUNNING = 64;
-/** Terminals that have ended and are still listed: the last to end. */
+/** Terminals that have ended and are still listed, which bounds what the ended hold. */
 export const MAX_ENDED = 64;
-/** How much of what a terminal wrote is kept for someone who comes late, in characters. */
-export const KEPT = 64 * 1024;
+/** How much of what a terminal wrote is kept for someone who comes late: some screens of it. */
+const KEPT = 64 * 1024;
+/** How much of a command `list_sessions` shows. */
+const CMD_SHOWN = 200;
 /** The most columns or rows a shell's terminal has. */
 const MAX_SIZE = 1_000;
 /** Sized so an answer fits what a model is usually given of a tool's output. */
@@ -76,7 +78,7 @@ const tail = (text: string) => text.slice(-KEPT).replace(/^[\uDC00-\uDFFF]/, "")
 export class Sessions {
   readonly #sessions = new Map<string, Session>();
   /** Those that have ended and are still listed, in the order they ended. */
-  readonly #ended: string[] = [];
+  readonly #ended: Session[] = [];
   readonly #root: string;
   readonly #emit: (event: CommandEvent) => void;
   readonly #pty: PtySpawn | undefined;
@@ -159,18 +161,19 @@ export class Sessions {
       const why = error instanceof Error ? error.message : String(error);
       throw new ExecRefused(`The shell didn't start: ${why}`);
     }
-    const { session, wrote, finish } = this.#begin("person", file, this.#root, true);
+    const { session, wrote, finish } = this.#begin("person", file, this.#root, true, {
+      type: (chars) => shell.write(chars),
+      signal(signal) {
+        try {
+          shell.kill(signal);
+        } catch {
+          // It has gone already.
+        }
+      },
+      resize: (cols, lines) => shell.resize(cols, lines),
+    });
     shell.onData((text) => wrote(text));
     shell.onExit(({ exitCode, signal }) => finish(signal ? 128 + signal : exitCode));
-    session.type = (chars) => shell.write(chars);
-    session.signal = (signal) => {
-      try {
-        shell.kill(signal);
-      } catch {
-        // It has gone already.
-      }
-    };
-    session.resize = (cols, lines) => shell.resize(cols, lines);
     return session.id;
   }
 
@@ -187,7 +190,10 @@ export class Sessions {
     session.resize(size.cols, size.rows);
   }
 
-  /** End one terminal: an interrupt, then a certain signal. One that has ended is left alone. */
+  /**
+   * End one terminal: an interrupt, then a certain signal. It resolves once the terminal has
+   * ended or that signal is sent. One that has ended is left alone.
+   */
   async stop(id: string) {
     const session = this.#sessions.get(id);
     if (!session) throw new ExecRefused(`No terminal ${id.slice(0, 64)} is here.`);
@@ -202,6 +208,7 @@ export class Sessions {
   async #end(sessions: Session[], polite: NodeJS.Signals) {
     const running = sessions.filter((s) => s.exitCode === undefined);
     // A shell on a terminal device ignores both of the polite ones, and ends when hung up on.
+    // Only the shell is signalled: what it runs is hung up on in turn, and may ignore that.
     for (const session of running) session.signal(session.tty ? "SIGHUP" : polite);
     let timer: NodeJS.Timeout | undefined;
     await Promise.race([
@@ -217,7 +224,7 @@ export class Sessions {
   #room() {
     const running = [...this.#sessions.values()].filter((s) => s.exitCode === undefined);
     if (running.length >= MAX_RUNNING)
-      throw new ExecRefused(`Already ${MAX_RUNNING} are running. Wait for one, or stop one.`);
+      throw new ExecRefused(`${MAX_RUNNING} commands are running. Wait for one, or stop one.`);
   }
 
   #running(id: string): Session {
@@ -227,8 +234,17 @@ export class Sessions {
     return session;
   }
 
-  /** List a terminal that has just started, and give the two ways its process reports back. */
-  #begin(by: Terminal["by"], cmd: string, workdir: string, tty: boolean) {
+  /**
+   * List a terminal that has just started, with the ways to act on its process, and give the two
+   * ways that process reports back.
+   */
+  #begin(
+    by: Terminal["by"],
+    cmd: string,
+    workdir: string,
+    tty: boolean,
+    acts: Pick<Session, "type" | "signal" | "resize">,
+  ) {
     const id = `s_${randomBytes(9).toString("hex")}`;
     const at = new Date().toISOString();
     let done = () => {};
@@ -244,8 +260,7 @@ export class Sessions {
       ended: new Promise<void>((resolve) => {
         done = resolve;
       }),
-      type() {},
-      signal() {},
+      ...acts,
     };
     this.#sessions.set(id, session);
     this.#emit({ type: "start", id, by, cmd, workdir, tty, at });
@@ -261,8 +276,13 @@ export class Sessions {
       session.exitCode = exitCode;
       session.endedAt = new Date().toISOString();
       this.#emit({ type: "exit", id, exitCode, at: session.endedAt });
-      this.#ended.push(id);
-      if (this.#ended.length > MAX_ENDED) this.#sessions.delete(this.#ended.shift() as string);
+      this.#ended.push(session);
+      if (this.#ended.length > MAX_ENDED) {
+        // One whose exit no answer has carried is still owed to whoever started it: it goes last.
+        const read = this.#ended.findIndex((one) => one.reported);
+        const [old] = this.#ended.splice(Math.max(read, 0), 1);
+        this.#sessions.delete((old as Session).id);
+      }
       done();
     };
     return { session, wrote, finish };
@@ -275,7 +295,21 @@ export class Sessions {
       // Its own process group, so a signal reaches what it started.
       detached: true,
     });
-    const { session, wrote, finish } = this.#begin("agent", cmd, cwd, false);
+    const signal = (name: NodeJS.Signals) => {
+      try {
+        if (child.pid) process.kill(-child.pid, name);
+      } catch {
+        // It has gone already.
+      }
+    };
+    const type = (chars: string) => {
+      for (const part of chars.split(/(\p{Cc})/u)) {
+        if (part === "\u0003") signal("SIGINT");
+        else if (part === "\u0004") child.stdin.end();
+        else if (part && child.stdin.writable) child.stdin.write(part);
+      }
+    };
+    const { session, wrote, finish } = this.#begin("agent", cmd, cwd, false, { type, signal });
     for (const [name, stream] of [
       ["stdout", child.stdout],
       ["stderr", child.stderr],
@@ -297,20 +331,6 @@ export class Sessions {
         finish(exitCode);
       });
     });
-    session.signal = (signal) => {
-      try {
-        if (child.pid) process.kill(-child.pid, signal);
-      } catch {
-        // It has gone already.
-      }
-    };
-    session.type = (chars) => {
-      for (const part of chars.split(/(\p{Cc})/u)) {
-        if (part === "\u0003") session.signal("SIGINT");
-        else if (part === "\u0004") child.stdin.end();
-        else if (part && child.stdin.writable) child.stdin.write(part);
-      }
-    };
     return session;
   }
 
@@ -360,6 +380,21 @@ export interface Listed {
   since: string;
   exit_code: number | null;
   cmd: string;
+}
+
+/** The terminals as `list_sessions` gives them, each command as its first line or its start. */
+export function listing(terminals: Terminal[]): Listed[] {
+  return terminals.map((one) => {
+    const line = (one.cmd.split("\n", 1)[0] as string).slice(0, CMD_SHOWN);
+    const shown = line.replace(/[\uD800-\uDBFF]$/, "");
+    return {
+      session_id: one.id,
+      started_by: one.by,
+      since: one.at,
+      exit_code: one.exitCode ?? null,
+      cmd: shown === one.cmd ? shown : `${shown}…`,
+    };
+  });
 }
 
 /** The list as its text: the same five fields for each, a blank line between. */

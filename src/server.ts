@@ -8,6 +8,7 @@ import {
   ExecRefused,
   formatAnswer,
   formatSessions,
+  listing,
   type Sessions,
 } from "./sessions.ts";
 
@@ -71,7 +72,7 @@ export function createServer(root: string, sessions: Sessions, version: string, 
       "write_stdin",
       {
         description:
-          "Types into a running command, or a shell a person opened, and returns what it wrote since. With no chars, waits and returns what it has written. A Ctrl-C character (\\u0003) interrupts it; Ctrl-D (\\u0004) ends its input.",
+          "Types into a running command and returns what it wrote since. With no chars, waits and returns what it has written. A Ctrl-C character (\\u0003) interrupts it; Ctrl-D (\\u0004) ends its input. It also reaches a shell a person opened, by its id from list_sessions: there these are keys, what you type joins anything already typed, and Ctrl-D at its prompt closes it. Once an answer has given a session's exit code, that session is refused.",
         inputSchema: {
           session_id: z.string().min(1).describe("From exec_command's answer, or list_sessions."),
           chars: z.string().optional().describe("What to type; include \\n to press Enter."),
@@ -89,7 +90,7 @@ export function createServer(root: string, sessions: Sessions, version: string, 
       "list_sessions",
       {
         description:
-          "Lists the terminals here, running or lately ended: each command exec_command started, and each shell a person opened. Gives each one's session_id for write_stdin, who started it, since when, its exit code and its command.",
+          "Lists the sessions here, running or lately ended: each command exec_command started, and each shell a person opened. Gives each one's session_id for write_stdin, who started it, since when, its exit code and the start of its command.",
         outputSchema: {
           sessions: z.array(
             z.object({
@@ -97,20 +98,14 @@ export function createServer(root: string, sessions: Sessions, version: string, 
               started_by: z.enum(["agent", "person"]).describe("A person's is their own shell."),
               since: z.string().describe("When it started."),
               exit_code: z.number().nullable().describe("Null while it is still running."),
-              cmd: z.string(),
+              cmd: z.string().describe("Its first line, or the start of it."),
             }),
           ),
         },
         annotations: READ_ONLY,
       },
       () => {
-        const listed = sessions.list().map((one) => ({
-          session_id: one.id,
-          started_by: one.by,
-          since: one.at,
-          exit_code: one.exitCode ?? null,
-          cmd: one.cmd,
-        }));
+        const listed = listing(sessions.list());
         return { ...text(formatSessions(listed)), structuredContent: { sessions: listed } };
       },
     );
