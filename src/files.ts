@@ -93,7 +93,7 @@ export function createFiles(root: string) {
   const text = async (path: string, given: string) => {
     await aFile(path, given);
     const bytes = await readFile(path);
-    if (bytes.includes(0)) throw new ExecRefused(`${path} is a binary file.`);
+    if (bytes.includes(0)) throw new ExecRefused(`${given} is a binary file.`);
     return bytes.toString("utf8");
   };
 
