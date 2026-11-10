@@ -278,10 +278,14 @@ for (const [name, connect] of Object.entries(CLIENTS)) {
     assert.equal(edited.isError, true);
     assert.equal(edited.text, "pipe isn't a file that can be read.");
     const onto = await client.call("edit", { path: "sub", old_text: "a", new_text: "b" });
+    assert.equal(onto.isError, true);
     assert.equal(onto.text, "sub is a folder.");
 
     assert.equal((await client.call("search", { pattern: "x", path: "pipe" })).text, "");
-    assert.equal((await client.call("search", { pattern: "x" })).text, "");
+    // Nor is a pipe read for a folder's ignore rules.
+    execFileSync("mkfifo", [join(workspace, "sub", ".gitignore")]);
+    writeFileSync(join(workspace, "sub", "a.txt"), "x marks\n");
+    assert.equal((await client.call("search", { pattern: "x" })).text, "sub/a.txt:1:x marks");
   });
 }
 

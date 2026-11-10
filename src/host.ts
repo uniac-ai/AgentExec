@@ -3,7 +3,7 @@
 import { randomBytes } from "node:crypto";
 import { lstat, open, readdir, rename, rm, stat } from "node:fs/promises";
 import { dirname, join } from "node:path";
-import { foldersFirst, inside, MAX_ENTRIES, refusing } from "./files.ts";
+import { aFile, foldersFirst, inside, MAX_ENTRIES, refusing } from "./files.ts";
 import type { FileEntry, FileUpload, HostFiles } from "./lib.ts";
 import { changedSince } from "./search.ts";
 import type { Level } from "./server.ts";
@@ -54,10 +54,7 @@ export function createHostFiles(root: string, level: Level) {
         )
           throw new ExecRefused("A read starts at 0 or later and takes 1 to 1,048,576 bytes.");
         const real = await inside(root, path);
-        const found = await stat(real);
-        if (found.isDirectory()) throw new ExecRefused(`${path} is a folder.`);
-        // Opening anything else, a pipe say, could wait for good.
-        if (!found.isFile()) throw new ExecRefused(`${path} isn't a file that can be read.`);
+        const found = await aFile(real, path);
         const file = await open(real, "r");
         try {
           const bytes = Buffer.alloc(Math.max(0, Math.min(length, found.size - offset)));
@@ -136,8 +133,9 @@ export function createHostFiles(root: string, level: Level) {
             }),
         };
         try {
-          // The mode of the file it replaces, which opening with it would let the umask cut.
-          if (before) await file.chmod(before.mode & 0o7777);
+          // The permissions of the file it replaces, which opening with them would let the umask
+          // cut.
+          if (before) await file.chmod(before.mode & 0o777);
           if (closes !== opening) throw new ExecRefused("It closed before that upload began.");
         } catch (error) {
           await discard();

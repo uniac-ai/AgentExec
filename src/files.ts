@@ -76,14 +76,22 @@ export async function inside(root: string, path: string): Promise<string> {
   return found;
 }
 
+/**
+ * What is at `path`, if it is a file, `given` being the path as it was asked for. Nothing else is
+ * ever opened: a pipe, say, could wait for good.
+ */
+export async function aFile(path: string, given: string) {
+  const found = await stat(path);
+  if (found.isDirectory()) throw new ExecRefused(`${given} is a folder.`);
+  if (!found.isFile()) throw new ExecRefused(`${given} isn't a file that can be read.`);
+  return found;
+}
+
 export function createFiles(root: string) {
   const at = (path: string) => inside(root, path);
   /** A file's text, `given` being the path as it was asked for. */
   const text = async (path: string, given: string) => {
-    const found = await stat(path);
-    if (found.isDirectory()) throw new ExecRefused(`${given} is a folder.`);
-    // Opening anything else, a pipe say, could wait for good.
-    if (!found.isFile()) throw new ExecRefused(`${given} isn't a file that can be read.`);
+    await aFile(path, given);
     const bytes = await readFile(path);
     if (bytes.includes(0)) throw new ExecRefused(`${path} is a binary file.`);
     return bytes.toString("utf8");
@@ -158,8 +166,8 @@ export function createFiles(root: string) {
         const temporary = join(dirname(path), `.agentexec-${randomBytes(6).toString("hex")}`);
         try {
           await writeFile(temporary, after, found ? { mode: found.mode } : {});
-          // Set again, because the umask cuts the mode a file is made with.
-          if (found) await chmod(temporary, found.mode & 0o7777);
+          // Its permissions, set again because the umask cuts the mode a file is made with.
+          if (found) await chmod(temporary, found.mode & 0o777);
           await rename(temporary, path);
         } catch (error) {
           await rm(temporary, { force: true });
