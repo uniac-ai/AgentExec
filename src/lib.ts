@@ -10,11 +10,83 @@ import { createServer } from "./server.ts";
 import { Sessions } from "./sessions.ts";
 import { VERSION } from "./version.ts";
 
-/** What happens to a command, as it happens. `id` is the session id its answers carry. */
+/**
+ * What happens to a terminal, as it happens. `id` is the session id its answers carry. `by` is the
+ * way in it came: `agent` through a tool, `person` through the host. One with `tty` is a shell on
+ * a terminal device, whose output is one stream and has no `stream`.
+ */
 export type CommandEvent =
-  | { type: "start"; id: string; cmd: string; workdir: string; at: string }
-  | { type: "output"; id: string; stream: "stdout" | "stderr"; text: string }
+  | {
+      type: "start";
+      id: string;
+      by: "agent" | "person";
+      cmd: string;
+      workdir: string;
+      tty: boolean;
+      at: string;
+    }
+  | { type: "output"; id: string; stream?: "stdout" | "stderr"; text: string }
   | { type: "exit"; id: string; exitCode: number; at: string };
+
+/** A terminal: a command the agent started, or a shell a person opened. */
+export interface Terminal {
+  id: string;
+  by: "agent" | "person";
+  cmd: string;
+  workdir: string;
+  tty: boolean;
+  /** When it started. */
+  at: string;
+  /** The end of what it has written so far: its last 65,536 characters. */
+  output: string;
+  /** These two once it has ended. */
+  exitCode?: number;
+  endedAt?: string;
+}
+
+/**
+ * The terminals for the host itself: what a person sees and does beside the agent. Each refuses
+ * with an error whose message says why.
+ */
+export interface HostTerminals {
+  /** Every terminal, the oldest first: those running, and the last 64 that ended. */
+  list(): Terminal[];
+  /**
+   * Start a person's login shell in the workspace, on a terminal device of this size, and give
+   * its id. It needs the `terminal` level and the `pty` option, and counts among the 64 running.
+   */
+  open(size: { columns: number; rows: number }): string;
+  /**
+   * Type into a running terminal, the agent's included. In a command, Ctrl-C interrupts it and
+   * Ctrl-D ends its input, as for `write_stdin`.
+   */
+  write(id: string, text: string): void;
+  /** Give a shell's terminal device a new size. A command has none. */
+  resize(id: string, columns: number, rows: number): void;
+  /** End a terminal: an interrupt, or a hangup for a shell, then a kill a second later. */
+  stop(id: string): Promise<void>;
+}
+
+/** A process on a terminal device, as much of one as is used. */
+export interface Pty {
+  onData(listener: (data: string) => void): unknown;
+  onExit(listener: (exit: { exitCode: number; signal?: number }) => void): unknown;
+  write(data: string): void;
+  resize(columns: number, rows: number): void;
+  kill(signal?: string): void;
+}
+/** Starts a process on a terminal device. `spawn` of `node-pty` is one. */
+export type PtySpawn = (
+  file: string,
+  args: string[],
+  options: {
+    name: string;
+    cols: number;
+    rows: number;
+    cwd: string;
+    env: Record<string, string | undefined>;
+  },
+) => Pty;
 
 /** One entry of a folder. A link is not followed: its size and date are its own. */
 export interface FileEntry {
@@ -54,8 +126,8 @@ export interface HostFiles {
   list(path?: string): Promise<{ entries: FileEntry[]; more: boolean }>;
   /**
    * `length` bytes of a file from `offset`, with its whole size and its date. Fewer bytes come
-   * back at its end, and none past it. A `length` under 1 or over 1,048,576 is refused, as is anything that
-   * isn't a file.
+   * back at its end, and none past it. A `length` under 1 or over 1,048,576 is refused, as is
+   * anything that isn't a file.
    */
   read(
     path: string,
@@ -80,23 +152,30 @@ export interface AgentExecOptions {
    * files: not at `read`, which is the default.
    */
   level?: "read" | "files" | "terminal";
+  /**
+   * What a person's shell runs on. AgentExec brings no terminal device of its own: without this,
+   * `terminals.open` is refused, and everything else is as it is.
+   */
+  pty?: PtySpawn;
 }
 
 export interface AgentExec {
   /** Answer one MCP request. Pass `body` if the host has already parsed it. */
   handle(request: IncomingMessage, response: ServerResponse, body?: unknown): Promise<void>;
   /**
-   * Hear each command start, write and exit as it happens, whatever the agent has asked for so
-   * far. Returns the way to stop listening. What a command writes still reaches the agent.
+   * Hear each terminal start, write and exit as it happens, whatever the agent has asked for so
+   * far. Returns the way to stop listening. What a terminal writes still reaches the agent.
    */
   onCommand(listener: (event: CommandEvent) => void): () => void;
+  /** The terminals, to list, open, type into, size and stop. */
+  terminals: HostTerminals;
   /**
    * The workspace's files for the host itself, in bytes and with dates, kept inside the workspace
    * as the tools are. None of it is a tool, and the agent's tools don't change. Each refuses with
    * an error whose message says why.
    */
   files: HostFiles;
-  /** Stop every command still running, and give up every upload still open. */
+  /** Stop every terminal still running, and give up every upload still open. */
   close(): Promise<void>;
 }
 
@@ -108,14 +187,18 @@ export function createAgentExec(options: AgentExecOptions): AgentExec {
   const root = realpathSync(resolve(options.workspace));
   const level = options.level ?? "read";
   const listeners = new Set<(event: CommandEvent) => void>();
-  const sessions = new Sessions(root, (event) => {
-    for (const listener of listeners)
-      try {
-        listener(event);
-      } catch {
-        // A listener that fails doesn't stop the command or the others.
-      }
-  });
+  const sessions = new Sessions(
+    root,
+    (event) => {
+      for (const listener of listeners)
+        try {
+          listener(event);
+        } catch {
+          // A listener that fails doesn't stop the terminal or the others.
+        }
+    },
+    options.pty,
+  );
   const host = createHostFiles(root, level);
   return {
     async handle(request, response, body) {
@@ -133,6 +216,16 @@ export function createAgentExec(options: AgentExecOptions): AgentExec {
       return () => void listeners.delete(listener);
     },
     files: host.files,
+    terminals: {
+      list: () => sessions.list(),
+      open({ columns, rows }) {
+        if (level !== "terminal") throw new Error("A shell needs the terminal level.");
+        return sessions.open(columns, rows);
+      },
+      write: (id, text) => sessions.type(id, text),
+      resize: (id, columns, rows) => sessions.resize(id, columns, rows),
+      stop: (id) => sessions.stop(id),
+    },
     async close() {
       await Promise.all([sessions.stopAll(), host.close()]);
     },
