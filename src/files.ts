@@ -162,7 +162,7 @@ export function createFiles(root: string) {
           after = before.split(input.old_text).join(input.new_text);
         }
         if (after === before) throw new ExecRefused("That edit changes nothing.");
-        // Written whole, keeping the file's mode.
+        // Written whole, keeping the file's permissions.
         const temporary = join(dirname(path), `.agentexec-${randomBytes(6).toString("hex")}`);
         try {
           await writeFile(temporary, after, found ? { mode: found.mode } : {});
