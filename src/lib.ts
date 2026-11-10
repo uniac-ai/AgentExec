@@ -42,7 +42,7 @@ export interface FileChanges {
 export interface FileUpload {
   /** Add the next part. */
   write(bytes: Uint8Array): Promise<void>;
-  /** Put the file in place, whole, over any that was there. */
+  /** Put the file in place, whole, over any that was there and with that one's permissions. */
   finish(): Promise<{ size: number; modifiedAt: string }>;
   /** Give up, leaving what was there. */
   abort(): Promise<void>;
@@ -54,7 +54,7 @@ export interface HostFiles {
   list(path?: string): Promise<{ entries: FileEntry[]; more: boolean }>;
   /**
    * `length` bytes of a file from `offset`, with its whole size and its date. Fewer bytes come
-   * back at its end, and none past it. A `length` over 1,048,576 is refused, as is anything that
+   * back at its end, and none past it. A `length` under 1 or over 1,048,576 is refused, as is anything that
    * isn't a file.
    */
   read(

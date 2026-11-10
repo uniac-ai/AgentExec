@@ -273,6 +273,10 @@ for (const [name, connect] of Object.entries(CLIENTS)) {
     const pipe = await client.call("read", { path: "pipe" });
     assert.equal(pipe.isError, true);
     assert.equal(pipe.text, "pipe isn't a file that can be read.");
+    writeFileSync(join(workspace, "sub", "data.bin"), new Uint8Array([1, 0, 2]));
+    const binary = await client.call("read", { path: "sub/data.bin" });
+    assert.equal(binary.isError, true);
+    assert.equal(binary.text, "sub/data.bin is a binary file.");
 
     const edited = await client.call("edit", { path: "pipe", old_text: "a", new_text: "b" });
     assert.equal(edited.isError, true);

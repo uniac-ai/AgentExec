@@ -93,7 +93,7 @@ export function createFiles(root: string) {
   const text = async (path: string, given: string) => {
     await aFile(path, given);
     const bytes = await readFile(path);
-    if (bytes.includes(0)) throw new ExecRefused(`${path} is a binary file.`);
+    if (bytes.includes(0)) throw new ExecRefused(`${given} is a binary file.`);
     return bytes.toString("utf8");
   };
 
@@ -162,7 +162,7 @@ export function createFiles(root: string) {
           after = before.split(input.old_text).join(input.new_text);
         }
         if (after === before) throw new ExecRefused("That edit changes nothing.");
-        // Written whole, keeping the file's mode.
+        // Written whole, keeping the file's permissions.
         const temporary = join(dirname(path), `.agentexec-${randomBytes(6).toString("hex")}`);
         try {
           await writeFile(temporary, after, found ? { mode: found.mode } : {});
