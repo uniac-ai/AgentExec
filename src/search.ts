@@ -80,7 +80,9 @@ function searched(job: SearchJob): string {
   const name = (path: string) => relative(job.root, path) || path;
 
   const scan = (file: string) => {
-    if (statSync(file).size > MAX_FILE_BYTES) return;
+    const found = statSync(file);
+    // Only a file is opened: a pipe, say, could wait for good.
+    if (!found.isFile() || found.size > MAX_FILE_BYTES) return;
     const bytes = readFileSync(file);
     if (bytes.includes(0)) return;
     bytes

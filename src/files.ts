@@ -1,7 +1,17 @@
 // Reading, listing and editing files. An edit replaces exact text and answers with a diff.
 import { randomBytes } from "node:crypto";
 import type { Dirent } from "node:fs";
-import { lstat, readdir, readFile, realpath, rename, rm, stat, writeFile } from "node:fs/promises";
+import {
+  chmod,
+  lstat,
+  readdir,
+  readFile,
+  realpath,
+  rename,
+  rm,
+  stat,
+  writeFile,
+} from "node:fs/promises";
 import { basename, dirname, join, resolve, sep } from "node:path";
 import { createTwoFilesPatch } from "diff";
 import { cut } from "./output.ts";
@@ -68,7 +78,12 @@ export async function inside(root: string, path: string): Promise<string> {
 
 export function createFiles(root: string) {
   const at = (path: string) => inside(root, path);
-  const text = async (path: string) => {
+  /** A file's text, `given` being the path as it was asked for. */
+  const text = async (path: string, given: string) => {
+    const found = await stat(path);
+    if (found.isDirectory()) throw new ExecRefused(`${given} is a folder.`);
+    // Opening anything else, a pipe say, could wait for good.
+    if (!found.isFile()) throw new ExecRefused(`${given} isn't a file that can be read.`);
     const bytes = await readFile(path);
     if (bytes.includes(0)) throw new ExecRefused(`${path} is a binary file.`);
     return bytes.toString("utf8");
@@ -78,7 +93,7 @@ export function createFiles(root: string) {
     /** Numbered lines of a file. */
     read: (input: { path: string; offset?: number | undefined; limit?: number | undefined }) =>
       refusing(async () => {
-        const lines = (await text(await at(input.path))).split("\n");
+        const lines = (await text(await at(input.path), input.path)).split("\n");
         const first = Math.max(input.offset ?? 1, 1);
         const shown = lines
           .slice(first - 1, first - 1 + (input.limit ?? DEFAULT_LINES))
@@ -122,7 +137,7 @@ export function createFiles(root: string) {
         });
         if (found && found.size > MAX_EDIT_BYTES)
           throw new ExecRefused(`${input.path} is too large to edit here.`);
-        const before = found ? await text(path) : "";
+        const before = found ? await text(path, input.path) : "";
         let after: string;
         if (input.old_text === "") {
           if (before !== "")
@@ -143,6 +158,8 @@ export function createFiles(root: string) {
         const temporary = join(dirname(path), `.agentexec-${randomBytes(6).toString("hex")}`);
         try {
           await writeFile(temporary, after, found ? { mode: found.mode } : {});
+          // Set again, because the umask cuts the mode a file is made with.
+          if (found) await chmod(temporary, found.mode & 0o7777);
           await rename(temporary, path);
         } catch (error) {
           await rm(temporary, { force: true });
