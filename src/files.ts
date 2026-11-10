@@ -1,5 +1,6 @@
 // Reading, listing and editing files. An edit replaces exact text and answers with a diff.
 import { randomBytes } from "node:crypto";
+import type { Dirent } from "node:fs";
 import { lstat, readdir, readFile, realpath, rename, rm, stat, writeFile } from "node:fs/promises";
 import { basename, dirname, join, resolve, sep } from "node:path";
 import { createTwoFilesPatch } from "diff";
@@ -9,7 +10,7 @@ import { ExecRefused } from "./sessions.ts";
 const DEFAULT_LINES = 2_000;
 const MAX_READ_CHARS = 28_000;
 const MAX_LINE_CHARS = 2_000;
-const MAX_ENTRIES = 1_000;
+export const MAX_ENTRIES = 1_000;
 const MAX_EDIT_BYTES = 8 * 1024 * 1024;
 
 const reason = (error: unknown) => {
@@ -20,7 +21,7 @@ const reason = (error: unknown) => {
   if (code === "EACCES" || code === "EPERM") return `Not allowed: ${path}`;
   return error instanceof Error ? error.message : String(error);
 };
-const refusing = async <T>(work: () => Promise<T>) => {
+export const refusing = async <T>(work: () => Promise<T>) => {
   try {
     return await work();
   } catch (error) {
@@ -28,6 +29,10 @@ const refusing = async <T>(work: () => Promise<T>) => {
     throw new ExecRefused(reason(error));
   }
 };
+
+/** A folder's entries in the order they are shown: folders, then files, each by name. */
+export const foldersFirst = (a: Dirent, b: Dirent) =>
+  Number(b.isDirectory()) - Number(a.isDirectory()) || a.name.localeCompare(b.name);
 
 /**
  * Where `path` really is, following links, if that is inside `root`, which must itself be a real
@@ -87,10 +92,7 @@ export function createFiles(root: string) {
       refusing(async () => {
         const folder = await at(input.path ?? ".");
         const entries = await readdir(folder, { withFileTypes: true });
-        entries.sort(
-          (a, b) =>
-            Number(b.isDirectory()) - Number(a.isDirectory()) || a.name.localeCompare(b.name),
-        );
+        entries.sort(foldersFirst);
         const lines = await Promise.all(
           entries.slice(0, MAX_ENTRIES).map(async (entry) => {
             if (entry.isDirectory()) return `${entry.name}/`;
