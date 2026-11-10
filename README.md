@@ -24,9 +24,13 @@ import { createAgentExec } from "@agentorg/exec";
 const exec = createAgentExec({ workspace: "/path/to/folder", level: "files" });
 // In a request handler, under any path, once you have decided the caller may reach it:
 await exec.handle(request, response);
+// To watch the agent's commands as they run, without waiting for it to ask:
+const stop = exec.onCommand((event) => console.log(event));
 // When you're done, which stops any command still running:
 await exec.close();
 ```
+
+Each command gives a `start` (its `cmd`, `workdir` and `at`), `output` as it's written (`stream` is `stdout` or `stderr`, and `text`), and an `exit` (`exitCode` and `at`). Each event has the `id` its session's answers carry as `session_id`. The agent's answers don't change.
 
 If you bundle it into a file of your own, don't start anything off the main thread: its search runs that same file on a worker thread.
 
