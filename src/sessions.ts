@@ -3,6 +3,7 @@
 import { type ChildProcessWithoutNullStreams, spawn } from "node:child_process";
 import { randomBytes } from "node:crypto";
 import { StringDecoder } from "node:string_decoder";
+import type { CommandEvent } from "./lib.ts";
 import { CHARS_PER_TOKEN, cut, Pending } from "./output.ts";
 
 export const MIN_YIELD_MS = 250;
@@ -52,9 +53,11 @@ const clamp = (value: number, low: number, high: number) => Math.min(Math.max(va
 export class Sessions {
   readonly #sessions = new Map<string, Session>();
   readonly #root: string;
+  readonly #emit: (event: CommandEvent) => void;
 
-  constructor(root: string) {
+  constructor(root: string, emit: (event: CommandEvent) => void = () => {}) {
     this.#root = root;
+    this.#emit = emit;
   }
 
   /** Run `cmd` in a login shell, in `workdir` or the workspace. */
@@ -114,20 +117,31 @@ export class Sessions {
       detached: true,
     });
     const pending = new Pending();
-    const session = { id: `s_${randomBytes(9).toString("hex")}`, child, pending } as Session;
-    for (const stream of [child.stdout, child.stderr]) {
+    const id = `s_${randomBytes(9).toString("hex")}`;
+    const session = { id, child, pending } as Session;
+    this.#emit({ type: "start", id, cmd, workdir: cwd, at: new Date().toISOString() });
+    for (const [name, stream] of [
+      ["stdout", child.stdout],
+      ["stderr", child.stderr],
+    ] as const) {
       const decoder = new StringDecoder("utf8");
-      stream.on("data", (chunk: Buffer) => pending.add(decoder.write(chunk)));
+      stream.on("data", (chunk: Buffer) => {
+        const text = decoder.write(chunk);
+        pending.add(text);
+        if (text) this.#emit({ type: "output", id, stream: name, text });
+      });
     }
     child.stdin.on("error", () => {});
     session.ended = new Promise<void>((done) => {
       const finish = (code: number) => {
         if (session.exitCode !== undefined) return;
         session.exitCode = code;
+        this.#emit({ type: "exit", id, exitCode: code, at: new Date().toISOString() });
         done();
       };
       child.once("error", (error) => {
         pending.add(`${error.message}\n`);
+        this.#emit({ type: "output", id, stream: "stderr", text: `${error.message}\n` });
         finish(127);
       });
       child.once("exit", (code, signal) => {

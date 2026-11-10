@@ -9,6 +9,12 @@ import { createServer } from "./server.ts";
 import { Sessions } from "./sessions.ts";
 import { VERSION } from "./version.ts";
 
+/** What happens to a command, as it happens. `id` is the session id its answers carry. */
+export type CommandEvent =
+  | { type: "start"; id: string; cmd: string; workdir: string; at: string }
+  | { type: "output"; id: string; stream: "stdout" | "stderr"; text: string }
+  | { type: "exit"; id: string; exitCode: number; at: string };
+
 export interface AgentExecOptions {
   /** The folder its file tools are kept to, and where commands start. */
   workspace: string;
@@ -19,6 +25,11 @@ export interface AgentExecOptions {
 export interface AgentExec {
   /** Answer one MCP request. Pass `body` if the host has already parsed it. */
   handle(request: IncomingMessage, response: ServerResponse, body?: unknown): Promise<void>;
+  /**
+   * Hear each command start, write and exit as it happens, whatever the agent has asked for so
+   * far. Returns the way to stop listening. What a command writes still reaches the agent.
+   */
+  onCommand(listener: (event: CommandEvent) => void): () => void;
   /** Stop every command still running. */
   close(): Promise<void>;
 }
@@ -30,7 +41,15 @@ export interface AgentExec {
 export function createAgentExec(options: AgentExecOptions): AgentExec {
   const root = realpathSync(resolve(options.workspace));
   const level = options.level ?? "read";
-  const sessions = new Sessions(root);
+  const listeners = new Set<(event: CommandEvent) => void>();
+  const sessions = new Sessions(root, (event) => {
+    for (const listener of listeners)
+      try {
+        listener(event);
+      } catch {
+        // A listener that fails doesn't stop the command or the others.
+      }
+  });
   return {
     async handle(request, response, body) {
       const server = createServer(root, sessions, VERSION, level);
@@ -41,6 +60,10 @@ export function createAgentExec(options: AgentExecOptions): AgentExec {
       });
       await server.connect(transport);
       await transport.handleRequest(request, response, body);
+    },
+    onCommand(listener) {
+      listeners.add(listener);
+      return () => void listeners.delete(listener);
     },
     close: () => sessions.stopAll(),
   };
