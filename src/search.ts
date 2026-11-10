@@ -46,8 +46,10 @@ function eachFile(start: string, visit: (file: string) => boolean) {
   const walk = (folder: string, rules: { base: string; ignore: Ignore }[]): boolean => {
     let here = rules;
     try {
-      const own = ignore().add(readFileSync(join(folder, ".gitignore"), "utf8"));
-      here = [...rules, { base: folder, ignore: own }];
+      const own = join(folder, ".gitignore");
+      // Only a file is opened here too.
+      if (statSync(own).isFile())
+        here = [...rules, { base: folder, ignore: ignore().add(readFileSync(own, "utf8")) }];
     } catch {
       // No ignore file here.
     }
@@ -80,7 +82,9 @@ function searched(job: SearchJob): string {
   const name = (path: string) => relative(job.root, path) || path;
 
   const scan = (file: string) => {
-    if (statSync(file).size > MAX_FILE_BYTES) return;
+    const found = statSync(file);
+    // Only a file is opened: a pipe, say, could wait for good.
+    if (!found.isFile() || found.size > MAX_FILE_BYTES) return;
     const bytes = readFileSync(file);
     if (bytes.includes(0)) return;
     bytes

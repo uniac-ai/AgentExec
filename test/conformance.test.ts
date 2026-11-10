@@ -1,7 +1,9 @@
 // What any client of AgentExec can rely on, run against two independent MCP clients and the
 // bundled server, as a host runs it.
 import assert from "node:assert/strict";
+import { execFileSync } from "node:child_process";
 import {
+  chmodSync,
   mkdirSync,
   mkdtempSync,
   readdirSync,
@@ -198,13 +200,15 @@ for (const [name, connect] of Object.entries(CLIENTS)) {
   test(`${name}: an edit replaces exact text and answers with a diff`, async (t) => {
     const { client, workspace } = await setup(t);
     const file = join(workspace, "a.txt");
-    writeFileSync(file, "one\ntwo\ntwo\n", { mode: 0o640 });
+    writeFileSync(file, "one\ntwo\ntwo\n");
+    // A mode the usual umask would cut, were the new file only made with it.
+    chmodSync(file, 0o666);
     const done = await client.call("edit", { path: "a.txt", old_text: "one\n", new_text: "ONE\n" });
     assert.equal(done.isError, false);
     assert.match(done.text, /--- a\.txt/);
     assert.match(done.text, /-one\n\+ONE/);
     assert.equal(readFileSync(file, "utf8"), "ONE\ntwo\ntwo\n");
-    assert.equal(statSync(file).mode & 0o777, 0o640);
+    assert.equal(statSync(file).mode & 0o777, 0o666);
 
     const twice = await client.call("edit", { path: "a.txt", old_text: "two", new_text: "x" });
     assert.equal(twice.isError, true);
@@ -256,6 +260,32 @@ for (const [name, connect] of Object.entries(CLIENTS)) {
     assert.deepEqual(pattern.text.split("\n"), ["a.txt:1:l1", "a.txt:3:l3"]);
     // Taken as exact text unless asked: the dot is a dot.
     assert.equal((await client.call("search", { pattern: "l.$" })).text, "");
+  });
+
+  test(`${name}: only a file is opened, so a folder and a pipe are refused at once`, async (t) => {
+    const { client, workspace } = await setup(t);
+    mkdirSync(join(workspace, "sub"));
+    execFileSync("mkfifo", [join(workspace, "pipe")]);
+
+    const folder = await client.call("read", { path: "sub" });
+    assert.equal(folder.isError, true);
+    assert.equal(folder.text, "sub is a folder.");
+    const pipe = await client.call("read", { path: "pipe" });
+    assert.equal(pipe.isError, true);
+    assert.equal(pipe.text, "pipe isn't a file that can be read.");
+
+    const edited = await client.call("edit", { path: "pipe", old_text: "a", new_text: "b" });
+    assert.equal(edited.isError, true);
+    assert.equal(edited.text, "pipe isn't a file that can be read.");
+    const onto = await client.call("edit", { path: "sub", old_text: "a", new_text: "b" });
+    assert.equal(onto.isError, true);
+    assert.equal(onto.text, "sub is a folder.");
+
+    assert.equal((await client.call("search", { pattern: "x", path: "pipe" })).text, "");
+    // Nor is a pipe read for a folder's ignore rules.
+    execFileSync("mkfifo", [join(workspace, "sub", ".gitignore")]);
+    writeFileSync(join(workspace, "sub", "a.txt"), "x marks\n");
+    assert.equal((await client.call("search", { pattern: "x" })).text, "sub/a.txt:1:x marks");
   });
 }
 
