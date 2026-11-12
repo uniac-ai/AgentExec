@@ -30,6 +30,26 @@ const stop = exec.onCommand((event) => console.log(event));
 await exec.close();
 ```
 
+A host can add tools to AgentExec's own, for what it knows of the workspace and AgentExec doesn't:
+
+```js
+import { hostname } from "node:os";
+
+const exec = createAgentExec({
+  workspace: "/path/to/folder",
+  extraTools: [
+    {
+      name: "about",
+      description: "Which machine this workspace is on.",
+      readOnly: true,
+      call: () => hostname(),
+    },
+  ],
+});
+```
+
+A tool added this way takes no input and answers text. It is offered at every level, whatever `level` is. One that throws is answered as a refusal, with the error's message, which the agent reads. `readOnly` tells an agent's client that it only reads. A name of one of AgentExec's seven, or one given twice, is refused when `createAgentExec` is called.
+
 Each terminal gives a `start` (its `cmd`, `workdir` and `at`, who started it as `by`, and `tty`), `output` as it's written (`text`, and for a command its `stream`, `stdout` or `stderr`), and an `exit` (`exitCode` and `at`). Each event has the `id` its session's answers carry as `session_id`. The agent's answers don't change.
 
 A terminal is a command the agent started, or a shell a person opened. Both are in one list, which the host reaches for the person as the agent reaches it through its tools:
