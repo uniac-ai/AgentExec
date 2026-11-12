@@ -43,6 +43,8 @@ export class ExecRefused extends Error {}
 
 interface Session {
   id: string;
+  /** The group its caller put it in, to stop with the others of that group. It names nobody. */
+  group?: string;
   by: Terminal["by"];
   cmd: string;
   workdir: string;
@@ -95,10 +97,13 @@ export class Sessions {
     workdir?: string | undefined;
     yield_time_ms?: number | undefined;
     max_output_tokens?: number | undefined;
+    /** A group to put it in, which `stopGroup` ends together. */
+    group?: string | undefined;
   }): Promise<Answer> {
     this.#room();
     const started = Date.now();
     const session = this.#start(input.cmd, input.workdir ?? this.#root);
+    if (input.group) session.group = input.group;
     const wait = clamp(input.yield_time_ms ?? DEFAULT_YIELD_MS, MIN_YIELD_MS, MAX_YIELD_MS);
     return this.#after(session, wait, started, input.max_output_tokens);
   }
@@ -198,6 +203,18 @@ export class Sessions {
     const session = this.#sessions.get(id);
     if (!session) throw new ExecRefused(`No terminal ${id.slice(0, 64)} is here.`);
     await this.#end([session], "SIGINT");
+  }
+
+  /**
+   * End the terminals still running of one group, as `stop` ends one, and say how many. A shell a
+   * person opened is in no group.
+   */
+  async stopGroup(group: string) {
+    const running = [...this.#sessions.values()].filter(
+      (session) => session.group === group && session.exitCode === undefined,
+    );
+    await this.#end(running, "SIGINT");
+    return running.length;
   }
 
   /** Stop every terminal: a polite signal, then a certain one. */

@@ -47,6 +47,18 @@ const Answered = {
   session_id: z.string().nullable().describe("For write_stdin, while it is still running."),
   text: z.string().describe("What it wrote since the last call, cut in the middle if long."),
 };
+// A group is a word a caller may send with `exec_command`, in the call's `_meta`, to put the
+// session it starts among others it means to stop together. It is opaque, and names nobody.
+const GROUP = "agentexec/group";
+// The request that ends the running sessions of a group, and answers how many.
+const STOP_GROUP = "agentexec/group/stop";
+const Group = z.string().min(1).max(200);
+const groupOf = (meta: Record<string, unknown> | undefined) => {
+  const word = Group.optional().safeParse(meta?.[GROUP]);
+  // Ignoring a word that isn't one would leave the session out of the group its caller meant.
+  if (!word.success) throw new ExecRefused(`${GROUP} in _meta is a string of 1 to 200 characters.`);
+  return word.data;
+};
 const YieldTime = z.number().int().positive().optional();
 const MaxTokens = z.number().int().positive().optional();
 const READ_ONLY = { readOnlyHint: true };
@@ -89,6 +101,12 @@ export function createServer(
     );
 
   if (level === "terminal") {
+    // Not a tool: it is for whatever calls the tools, not for the agent that asks for them.
+    server.server.setRequestHandler(
+      STOP_GROUP,
+      { params: z.object({ group: Group }), result: z.object({ stopped: z.number() }) },
+      async ({ group }) => ({ stopped: await sessions.stopGroup(group) }),
+    );
     server.registerTool(
       "exec_command",
       {
@@ -103,7 +121,8 @@ export function createServer(
         outputSchema: Answered,
         annotations: { destructiveHint: true },
       },
-      (input) => answering(() => sessions.exec(input)),
+      (input, ctx) =>
+        answering(async () => sessions.exec({ ...input, group: groupOf(ctx.mcpReq._meta) })),
     );
     server.registerTool(
       "write_stdin",

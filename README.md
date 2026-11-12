@@ -131,6 +131,12 @@ Once 64 have ended, each that ends takes one off the list: the earliest whose ex
 
 At most 64 run at once, a person's shells among them; past that a new one is refused, and none is evicted. Over stdio, closing the connection stops every one still running. Over HTTP and in a host they run until it stops.
 
+A caller can put the sessions it starts in a group, to stop them together. It sends a word with `exec_command`, as `agentexec/group` in the call's `_meta`: `{"_meta": {"agentexec/group": "<word>"}}`. The word is a string of 1 to 200 characters that means nothing here and names nobody; a call with anything else for it is refused. The request `agentexec/group/stop`, with `{"group": "<word>"}` as its params, ends every running session of that group and answers `{"stopped": <how many>}`: an interrupt, then a kill a second later. A call still waiting on one of them is answered then, with its exit code.
+
+- It is a request and not a tool, so it is for whatever calls the tools, and the agent isn't shown it. It is there at the `terminal` level. Whoever can reach the server can stop any group by its word.
+- A session started with no word is in no group, and neither is a person's shell: nothing stops them this way. Nor does closing a call's request, which leaves its command running.
+- A process that left its command's process group, a daemon or anything under `setsid`, isn't signalled. Its session ends and is counted, and that process runs on.
+
 ## Differences from Codex
 
 `exec_command` and `write_stdin` follow [OpenAI Codex](https://github.com/openai/codex); see NOTICE. They differ in three ways:
