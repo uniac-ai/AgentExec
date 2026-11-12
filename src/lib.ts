@@ -6,7 +6,7 @@ import type { IncomingMessage, ServerResponse } from "node:http";
 import { resolve } from "node:path";
 import { NodeStreamableHTTPServerTransport } from "@modelcontextprotocol/node";
 import { createHostFiles } from "./host.ts";
-import { createServer } from "./server.ts";
+import { createServer, TOOLS } from "./server.ts";
 import { Sessions } from "./sessions.ts";
 import { VERSION } from "./version.ts";
 
@@ -151,6 +151,20 @@ export interface HostFiles {
   upload(path: string): Promise<FileUpload>;
 }
 
+/**
+ * A tool the host adds to AgentExec's own, for what it knows of the workspace and AgentExec
+ * doesn't. It takes no input and answers text, and it is offered at every level.
+ */
+export interface ExtraTool {
+  name: string;
+  /** What the agent reads to know when to call it. */
+  description: string;
+  /** Whether it only reads, which is what an agent's client is told. Not unless it says so. */
+  readOnly?: boolean;
+  /** Its answer. One that throws is answered as a refusal, with the error's message. */
+  call(): string | Promise<string>;
+}
+
 export interface AgentExecOptions {
   /** The folder its file tools are kept to, and where commands start. */
   workspace: string;
@@ -164,6 +178,8 @@ export interface AgentExecOptions {
    * `terminals.open` is refused, and everything else is as it is.
    */
   pty?: PtySpawn;
+  /** Tools the host adds. A name of one of AgentExec's seven, or one given twice, is refused. */
+  extraTools?: ExtraTool[];
 }
 
 export interface AgentExec {
@@ -207,9 +223,15 @@ export function createAgentExec(options: AgentExecOptions): AgentExec {
     options.pty,
   );
   const host = createHostFiles(root, level);
+  const extraTools = [...(options.extraTools ?? [])];
+  const names = new Set<string>(TOOLS);
+  for (const { name } of extraTools) {
+    if (names.has(name)) throw new Error(`There is already a tool called ${name}.`);
+    names.add(name);
+  }
   return {
     async handle(request, response, body) {
-      const server = createServer(root, sessions, VERSION, level);
+      const server = createServer(root, sessions, VERSION, level, extraTools);
       const transport = new NodeStreamableHTTPServerTransport({ sessionIdGenerator: undefined });
       response.once("close", () => {
         void transport.close();

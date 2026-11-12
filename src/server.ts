@@ -1,7 +1,8 @@
-// The seven tools over MCP.
+// The seven tools over MCP, and any the host adds.
 import { McpServer } from "@modelcontextprotocol/server";
 import { z } from "zod";
 import { createFiles } from "./files.ts";
+import type { ExtraTool } from "./lib.ts";
 import { search } from "./search.ts";
 import {
   type Answer,
@@ -43,13 +44,42 @@ const YieldTime = z.number().int().positive().optional();
 const MaxTokens = z.number().int().positive().optional();
 const READ_ONLY = { readOnlyHint: true };
 
+/** AgentExec's own tools, at one level or another. */
+export const TOOLS = [
+  "exec_command",
+  "write_stdin",
+  "list_sessions",
+  "read",
+  "list",
+  "search",
+  "edit",
+] as const;
+
 /** How far an agent reaches, each level containing the one before. */
 export const LEVELS = ["read", "files", "terminal"] as const;
 export type Level = (typeof LEVELS)[number];
 
-export function createServer(root: string, sessions: Sessions, version: string, level: Level) {
+export function createServer(
+  root: string,
+  sessions: Sessions,
+  version: string,
+  level: Level,
+  extraTools: ExtraTool[] = [],
+) {
   const server = new McpServer({ name: "agentexec", version });
   const files = createFiles(root);
+  for (const { name, description, readOnly, call } of extraTools)
+    server.registerTool(
+      name,
+      { description, ...(readOnly ? { annotations: READ_ONLY } : {}) },
+      async () => {
+        try {
+          return text(String(await call()));
+        } catch (error) {
+          return { isError: true, ...text(error instanceof Error ? error.message : String(error)) };
+        }
+      },
+    );
 
   if (level === "terminal") {
     server.registerTool(
