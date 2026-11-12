@@ -4,6 +4,7 @@ import type { Dirent } from "node:fs";
 import {
   chmod,
   lstat,
+  open,
   readdir,
   readFile,
   realpath,
@@ -22,6 +23,33 @@ const MAX_READ_CHARS = 28_000;
 const MAX_LINE_CHARS = 2_000;
 export const MAX_ENTRIES = 1_000;
 const MAX_EDIT_BYTES = 8 * 1024 * 1024;
+/**
+ * The largest picture `read` answers. As base64 it is 4 MiB, under the 5 MB a model's API takes
+ * for one picture.
+ */
+export const MAX_PICTURE_BYTES = 3 * 1024 * 1024;
+
+/** A picture as `read` answers it. */
+export interface Picture {
+  mimeType: string;
+  bytes: Buffer;
+}
+
+/** Which kind of picture a file is, by how it begins, of the kinds a model is shown. */
+async function pictureKind(path: string): Promise<string | undefined> {
+  const file = await open(path);
+  try {
+    const { buffer, bytesRead } = await file.read(Buffer.alloc(12), 0, 12, 0);
+    const start = buffer.toString("latin1", 0, bytesRead);
+    if (start.startsWith("\x89PNG\r\n\x1a\n")) return "image/png";
+    if (start.startsWith("\xff\xd8\xff")) return "image/jpeg";
+    if (start.startsWith("GIF87a") || start.startsWith("GIF89a")) return "image/gif";
+    if (start.startsWith("RIFF") && start.slice(8) === "WEBP") return "image/webp";
+    return undefined;
+  } finally {
+    await file.close();
+  }
+}
 
 const reason = (error: unknown) => {
   const { code, path } = error as NodeJS.ErrnoException;
@@ -98,10 +126,21 @@ export function createFiles(root: string) {
   };
 
   return {
-    /** Numbered lines of a file. */
+    /** Numbered lines of a file, or the file itself where it is a picture. */
     read: (input: { path: string; offset?: number | undefined; limit?: number | undefined }) =>
-      refusing(async () => {
-        const lines = (await text(await at(input.path), input.path)).split("\n");
+      refusing(async (): Promise<string | Picture> => {
+        const path = await at(input.path);
+        const { size } = await aFile(path, input.path);
+        const mimeType = await pictureKind(path);
+        if (mimeType) {
+          // Its size is known before any of it is read, so one too large is never held.
+          if (size > MAX_PICTURE_BYTES)
+            throw new ExecRefused(
+              `${input.path} is too large to read as a picture: ${size.toLocaleString("en-US")} bytes, and the most is ${MAX_PICTURE_BYTES.toLocaleString("en-US")}.`,
+            );
+          return { mimeType, bytes: await readFile(path) };
+        }
+        const lines = (await text(path, input.path)).split("\n");
         const first = Math.max(input.offset ?? 1, 1);
         const shown = lines
           .slice(first - 1, first - 1 + (input.limit ?? DEFAULT_LINES))

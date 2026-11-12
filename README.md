@@ -95,15 +95,15 @@ If you bundle it into a file of your own, don't start anything off the main thre
 
 ## Tools
 
-| Tool            | What it does                                                                                                                                                                                  |
-| --------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `exec_command`  | Runs `cmd` in a login shell, in `workdir` or the workspace. Waits `yield_time_ms` (250 to 30000, default 10000), then answers. A command still running keeps running and gets a `session_id`. |
-| `write_stdin`   | Types `chars` into a running session and answers with what it wrote since. With no `chars`, waits (5000 to 30000 ms, default 5000) for more. `\u0003` interrupts it, `\u0004` ends its input. |
-| `list_sessions` | The terminals here, running or lately ended: each one's `session_id`, who started it (`agent` or `person`), since when, its exit code or `running`, and its command.                          |
-| `read`          | A text file as numbered lines, from `offset` (1) for `limit` lines (2000).                                                                                                                    |
-| `list`          | A folder: folders end in `/`, files give their size in bytes.                                                                                                                                 |
-| `search`        | Text under a folder, as `path:line:text`. Exact text unless `regex`. Skips what `.gitignore` ignores, `.git` and `node_modules`.                                                              |
-| `edit`          | Replaces exact text, which must appear once unless `replace_all`, and answers with a unified diff. An empty `old_text` creates a new file.                                                    |
+| Tool            | What it does                                                                                                                                                                                                                                        |
+| --------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `exec_command`  | Runs `cmd` in a login shell, in `workdir` or the workspace. Waits `yield_time_ms` (250 to 30000, default 10000), then answers. A command still running keeps running and gets a `session_id`.                                                       |
+| `write_stdin`   | Types `chars` into a running session and answers with what it wrote since. With no `chars`, waits (5000 to 30000 ms, default 5000) for more. `\u0003` interrupts it, `\u0004` ends its input.                                                       |
+| `list_sessions` | The terminals here, running or lately ended: each one's `session_id`, who started it (`agent` or `person`), since when, its exit code or `running`, and its command.                                                                                |
+| `read`          | A text file as numbered lines, from `offset` (1) for `limit` lines (2000). A PNG, JPEG, GIF or WebP of up to 3 MiB, told by how its bytes begin, as an image with a line of text naming it. A larger picture and any other binary file are refused. |
+| `list`          | A folder: folders end in `/`, files give their size in bytes.                                                                                                                                                                                       |
+| `search`        | Text under a folder, as `path:line:text`. Exact text unless `regex`. Skips what `.gitignore` ignores, `.git` and `node_modules`.                                                                                                                    |
+| `edit`          | Replaces exact text, which must appear once unless `replace_all`, and answers with a unified diff. An empty `old_text` creates a new file.                                                                                                          |
 
 Relative paths are relative to the workspace, and a path that really lies outside it is refused. A failed tool sets MCP's `isError`; a command that exits non-zero is an answer, not a failure.
 
