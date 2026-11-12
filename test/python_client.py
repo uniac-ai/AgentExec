@@ -1,7 +1,7 @@
 """An MCP client on the official Python SDK, driven by JSON lines on stdin, one call at a time or many.
 
 Each request is {"id", "tool", "args"}, or {"id", "list": true}. Each answer is {"id", "text",
-"isError"}, or {"id", "tools"}.
+"isError"}, with "images" where it has pictures, or {"id", "tools"}.
 """
 import asyncio
 import json
@@ -18,7 +18,15 @@ async def answer(session, request):
         return {"id": request["id"], "tools": [tool.name for tool in listed.tools]}
     result = await session.call_tool(request["tool"], request["args"])
     text = "".join(block.text for block in result.content if block.type == "text")
-    return {"id": request["id"], "text": text, "isError": bool(result.is_error)}
+    reply = {"id": request["id"], "text": text, "isError": bool(result.is_error)}
+    images = [
+        {"mimeType": block.mime_type, "data": block.data}
+        for block in result.content
+        if block.type == "image"
+    ]
+    if images:
+        reply["images"] = images
+    return reply
 
 
 async def main():

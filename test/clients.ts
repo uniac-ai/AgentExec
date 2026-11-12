@@ -9,7 +9,22 @@ import { StdioClientTransport } from "@modelcontextprotocol/client/stdio";
 export interface Called {
   text: string;
   isError: boolean;
+  /** The pictures in the answer, where it has any. */
+  images?: { mimeType: string; data: string }[];
 }
+/** An answer as the tests read it: its text, and its pictures where it has any. */
+function called(answer: unknown): Called {
+  const { content, isError } = answer as {
+    content: { type: string; text?: string; mimeType?: string; data?: string }[];
+    isError?: boolean;
+  };
+  const text = content.map((block) => block.text ?? "").join("");
+  const images = content.flatMap((block) =>
+    block.type === "image" ? [{ mimeType: block.mimeType ?? "", data: block.data ?? "" }] : [],
+  );
+  return { text, isError: isError === true, ...(images.length ? { images } : {}) };
+}
+
 export interface McpClient {
   tools(): Promise<string[]>;
   call(tool: string, args: Record<string, unknown>): Promise<Called>;
@@ -37,12 +52,7 @@ async function typescriptClient(workspace: string, level: string): Promise<McpCl
   return {
     tools: async () => (await client.listTools()).tools.map((tool) => tool.name),
     async call(name, args) {
-      const result = (await client.callTool({ name, arguments: args })) as {
-        content: { type: string; text?: string }[];
-        isError?: boolean;
-      };
-      const text = result.content.map((block) => block.text ?? "").join("");
-      return { text, isError: result.isError === true };
+      return called(await client.callTool({ name, arguments: args }));
     },
     close: () => client.close(),
   };
@@ -82,7 +92,12 @@ async function pythonClient(workspace: string, level: string): Promise<McpClient
     tools: async () => (await ask({ list: true })).tools as string[],
     async call(tool, args) {
       const reply = await ask({ tool, args });
-      return { text: reply.text as string, isError: reply.isError as boolean };
+      const images = reply.images as Called["images"];
+      return {
+        text: reply.text as string,
+        isError: reply.isError as boolean,
+        ...(images ? { images } : {}),
+      };
     },
     close: () =>
       new Promise<void>((done) => {
@@ -125,12 +140,7 @@ const connected = async (url: string, token: string): Promise<McpClient> => {
   return {
     tools: async () => (await client.listTools()).tools.map((tool) => tool.name),
     async call(name, args) {
-      const result = (await client.callTool({ name, arguments: args })) as {
-        content: { type: string; text?: string }[];
-        isError?: boolean;
-      };
-      const text = result.content.map((block) => block.text ?? "").join("");
-      return { text, isError: result.isError === true };
+      return called(await client.callTool({ name, arguments: args }));
     },
     close: () => client.close(),
   };

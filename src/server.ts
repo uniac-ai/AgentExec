@@ -1,7 +1,7 @@
 // The seven tools over MCP, and any the host adds.
 import { McpServer } from "@modelcontextprotocol/server";
 import { z } from "zod";
-import { createFiles } from "./files.ts";
+import { createFiles, type Picture } from "./files.ts";
 import type { ExtraTool } from "./lib.ts";
 import { search } from "./search.ts";
 import {
@@ -26,6 +26,13 @@ const answering = async (work: () => Promise<Answer>) => {
     return refused(error);
   }
 };
+/** A picture as an answer, with a line of text for whoever is shown only text. */
+const pictured = (path: string, { mimeType, bytes }: Picture) => ({
+  content: [
+    { type: "text" as const, text: `${path}: ${mimeType}` },
+    { type: "image" as const, mimeType, data: bytes.toString("base64") },
+  ],
+});
 const saying = async (work: () => Promise<string>) => {
   try {
     return text(await work());
@@ -143,7 +150,8 @@ export function createServer(
   server.registerTool(
     "read",
     {
-      description: "Reads a text file as numbered lines.",
+      description:
+        "Reads a text file as numbered lines, or shows a PNG, JPEG, GIF or WebP of up to 3 MiB as an image; offset and limit are for text.",
       inputSchema: {
         path: z.string().min(1).describe("Inside the workspace; relative to it, or absolute."),
         offset: z.number().int().positive().optional().describe("The first line, from 1."),
@@ -151,7 +159,14 @@ export function createServer(
       },
       annotations: READ_ONLY,
     },
-    (input) => saying(() => files.read(input)),
+    async (input) => {
+      try {
+        const read = await files.read(input);
+        return typeof read === "string" ? text(read) : pictured(input.path, read);
+      } catch (error) {
+        return refused(error);
+      }
+    },
   );
   server.registerTool(
     "list",

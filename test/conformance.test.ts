@@ -285,6 +285,58 @@ for (const [name, connect] of Object.entries(CLIENTS)) {
     assert.equal((await client.call("search", { pattern: "l.$" })).text, "");
   });
 
+  test(`${name}: read answers a picture as an image, and refuses one too large`, async (t) => {
+    const { client, workspace } = await setup(t);
+    const dot = Buffer.from(
+      "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8DwHwAFBQIAX8jx0gAAAABJRU5ErkJggg==",
+      "base64",
+    );
+    // By how its bytes begin, whatever it is called.
+    writeFileSync(join(workspace, "shot"), dot);
+    assert.deepEqual(await client.call("read", { path: "shot" }), {
+      text: "shot: image/png",
+      isError: false,
+      images: [{ mimeType: "image/png", data: dot.toString("base64") }],
+    });
+    for (const [start, mimeType] of [
+      ["\xff\xd8\xff\xe0\0", "image/jpeg"],
+      ["GIF89a\0", "image/gif"],
+      ["RIFF\0\0\0\0WEBP\0", "image/webp"],
+    ] as const) {
+      writeFileSync(join(workspace, "picture"), Buffer.from(start, "latin1"));
+      const read = await client.call("read", { path: "picture" });
+      assert.equal(read.images?.[0]?.mimeType, mimeType);
+    }
+    // What only begins like one of them is a binary file like any other.
+    writeFileSync(join(workspace, "sound.wav"), Buffer.from("RIFF\0\0\0\0WAVE\0", "latin1"));
+    assert.equal(
+      (await client.call("read", { path: "sound.wav" })).text,
+      "sound.wav is a binary file.",
+    );
+
+    // The largest that is answered, and one byte more.
+    const most = 3 * 1024 * 1024;
+    writeFileSync(
+      join(workspace, "large.png"),
+      Buffer.concat([dot, Buffer.alloc(most - dot.length)]),
+    );
+    assert.equal(
+      (await client.call("read", { path: "large.png" })).images?.[0]?.data.length,
+      (most / 3) * 4,
+    );
+    writeFileSync(
+      join(workspace, "larger.png"),
+      Buffer.concat([dot, Buffer.alloc(most - dot.length + 1)]),
+    );
+    assert.deepEqual(await client.call("read", { path: "larger.png" }), {
+      text: `larger.png is too large to read as a picture: ${(most + 1).toLocaleString("en-US")} bytes, and the most is ${most.toLocaleString("en-US")}.`,
+      isError: true,
+    });
+
+    const edited = await client.call("edit", { path: "shot", old_text: "a", new_text: "b" });
+    assert.equal(edited.text, "shot is a binary file.");
+  });
+
   test(`${name}: only a file is opened, so a folder and a pipe are refused at once`, async (t) => {
     const { client, workspace } = await setup(t);
     mkdirSync(join(workspace, "sub"));
