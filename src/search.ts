@@ -2,11 +2,11 @@
 // their own: a slow pattern or a huge tree can't hold up the commands, and is stopped at its
 // deadline.
 import { readdirSync, readFileSync, statSync } from "node:fs";
-import { join, relative, resolve, sep } from "node:path";
+import { isAbsolute, join, relative, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import { isMainThread, parentPort, Worker, workerData } from "node:worker_threads";
 import ignore, { type Ignore } from "ignore";
-import { inside } from "./files.ts";
+import type { Resolve } from "./files.ts";
 import type { FileChange, FileChanges } from "./lib.ts";
 import { ExecRefused } from "./sessions.ts";
 
@@ -79,7 +79,11 @@ function searched(job: SearchJob): string {
   const matcher = new RegExp(pattern, job.ignore_case ? "i" : "");
   const limit = job.limit ?? DEFAULT_MATCHES;
   const out: string[] = [];
-  const name = (path: string) => relative(job.root, path) || path;
+  // From the workspace where it is in it, and whole where it isn't or is the workspace itself.
+  const name = (path: string) => {
+    const from = relative(job.root, path);
+    return from === ".." || from.startsWith(`..${sep}`) || isAbsolute(from) ? path : from || path;
+  };
 
   const scan = (file: string) => {
     const found = statSync(file);
@@ -157,8 +161,8 @@ function onThread<T>(job: Job, what: string): Promise<T> {
   });
 }
 
-export async function search(root: string, input: SearchInput): Promise<string> {
-  const path = await inside(root, input.path ?? ".");
+export async function search(root: string, at: Resolve, input: SearchInput): Promise<string> {
+  const path = await at(input.path ?? ".");
   return onThread({ ...input, path, root, agentexecSearch: true }, "That search");
 }
 

@@ -1,10 +1,11 @@
-// AgentExec: `agentexec [--workspace DIR] [--level read|files|terminal] [--http HOST:PORT]` serves
-// MCP over stdio, or over Streamable HTTP with a bearer token.
+// AgentExec: `agentexec [--workspace DIR] [--level read|files|terminal] [--reach workspace|machine]
+// [--http HOST:PORT]` serves MCP over stdio, or over Streamable HTTP with a bearer token.
 import { realpathSync } from "node:fs";
 import { resolve } from "node:path";
 import { parseArgs } from "node:util";
 import { isMainThread } from "node:worker_threads";
 import { StdioServerTransport } from "@modelcontextprotocol/server/stdio";
+import type { Reach } from "./files.ts";
 import { serveHttp } from "./http.ts";
 import "./search.ts";
 import { createServer, LEVELS, type Level } from "./server.ts";
@@ -16,15 +17,19 @@ async function main() {
     options: {
       workspace: { type: "string" },
       level: { type: "string" },
+      reach: { type: "string" },
       http: { type: "string" },
     },
   });
   const level = (values.level ?? "read") as Level;
   if (!LEVELS.includes(level)) throw new Error(`--level is one of ${LEVELS.join(", ")}.`);
+  const reach = (values.reach ?? "workspace") as Reach;
+  if (reach !== "workspace" && reach !== "machine")
+    throw new Error("--reach is workspace or machine.");
   const root = realpathSync(resolve(values.workspace ?? process.cwd()));
-  if (values.http) return serveHttp(values.http, root, level);
+  if (values.http) return serveHttp(values.http, root, level, reach);
   const sessions = new Sessions(root);
-  const server = createServer(root, sessions, VERSION, level);
+  const server = createServer(root, sessions, VERSION, level, [], reach);
   let stopping = false;
   const stop = async () => {
     if (stopping) return;

@@ -5,6 +5,7 @@ import { realpathSync } from "node:fs";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { resolve } from "node:path";
 import { NodeStreamableHTTPServerTransport } from "@modelcontextprotocol/node";
+import type { Reach } from "./files.ts";
 import { createHostFiles } from "./host.ts";
 import { createServer, TOOLS } from "./server.ts";
 import { Sessions } from "./sessions.ts";
@@ -166,8 +167,18 @@ export interface ExtraTool {
 }
 
 export interface AgentExecOptions {
-  /** The folder its file tools are kept to, and where commands start. */
+  /**
+   * Where commands start and relative paths begin and, unless `reach` is `machine`, the folder the
+   * file tools are kept to.
+   */
   workspace: string;
+  /**
+   * Where the file tools reach: the workspace, which is the default, or the whole machine, with
+   * relative paths still from the workspace. At `workspace` this is a check, not a boundary; at
+   * `machine` there is none. Commands reach whatever the user running them can either way. A
+   * host's own files stay within the workspace whatever this is.
+   */
+  reach?: Reach;
   /**
    * Which tools it offers, each level containing the one before, and whether the host may write
    * files: not at `read`, which is the default.
@@ -231,7 +242,7 @@ export function createAgentExec(options: AgentExecOptions): AgentExec {
   }
   return {
     async handle(request, response, body) {
-      const server = createServer(root, sessions, VERSION, level, extraTools);
+      const server = createServer(root, sessions, VERSION, level, extraTools, options.reach);
       const transport = new NodeStreamableHTTPServerTransport({ sessionIdGenerator: undefined });
       response.once("close", () => {
         void transport.close();

@@ -72,36 +72,55 @@ export const refusing = async <T>(work: () => Promise<T>) => {
 export const foldersFirst = (a: Dirent, b: Dirent) =>
   Number(b.isDirectory()) - Number(a.isDirectory()) || a.name.localeCompare(b.name);
 
+/** Where the file tools reach: the workspace, or the whole machine. */
+export type Reach = "workspace" | "machine";
+
+/** The real path to use for a path the model gave the file tools. */
+export type Resolve = (path: string) => Promise<string>;
+
 /**
- * Where `path` really is, following links, if that is inside `root`, which must itself be a real
- * path. A path that doesn't exist yet is judged by the nearest folder above it that does. This is
- * a check, not a boundary: only the host running this can make one.
+ * Paths for the file tools. Relative ones start at `root`, which must itself be a real path, and
+ * links are followed. At `workspace` a path must stay inside `root`: a check, not a boundary, as
+ * only the host running this can make one. At `machine` it may be anywhere.
  */
-export async function inside(root: string, path: string): Promise<string> {
-  const refused = () => new ExecRefused(`${path} is outside the workspace.`);
-  const wanted = resolve(root, path);
-  const real = async (at: string): Promise<string> => {
-    try {
-      return await realpath(at);
-    } catch (error) {
-      const { code } = error as NodeJS.ErrnoException;
-      if (code !== "ENOENT" && code !== "ENOTDIR") throw error;
-      // A link that points nowhere can't be judged by what is above it.
-      if (
-        await lstat(at).then(
-          () => true,
-          () => false,
-        )
-      )
-        throw refused();
-      const above = dirname(at);
-      if (above === at) throw refused();
-      return join(await real(above), basename(at));
+export const resolver =
+  (root: string, reach: Reach): Resolve =>
+  async (path) => {
+    const found = await real(resolve(root, path));
+    if (reach === "machine") {
+      if (found === undefined) throw new ExecRefused(`${path} is a link to nothing.`);
+      return found;
     }
+    if (found === undefined || (found !== root && !found.startsWith(root + sep)))
+      throw new ExecRefused(`${path} is outside the workspace.`);
+    return found;
   };
-  const found = await real(wanted);
-  if (found !== root && !found.startsWith(root + sep)) throw refused();
-  return found;
+
+/** Where `path` really is, following links, if that is inside `root`. */
+export const inside = (root: string, path: string) => resolver(root, "workspace")(path);
+
+/**
+ * Where `at` really is, following links. One that doesn't exist yet is placed by the nearest
+ * folder above it that does; one below a link that points nowhere has no place.
+ */
+async function real(at: string): Promise<string | undefined> {
+  try {
+    return await realpath(at);
+  } catch (error) {
+    const { code } = error as NodeJS.ErrnoException;
+    if (code !== "ENOENT" && code !== "ENOTDIR") throw error;
+    if (
+      await lstat(at).then(
+        () => true,
+        () => false,
+      )
+    )
+      return undefined;
+    const above = dirname(at);
+    if (above === at) return undefined;
+    const placed = await real(above);
+    return placed === undefined ? undefined : join(placed, basename(at));
+  }
 }
 
 /**
@@ -115,8 +134,7 @@ export async function aFile(path: string, given: string) {
   return found;
 }
 
-export function createFiles(root: string) {
-  const at = (path: string) => inside(root, path);
+export function createFiles(at: Resolve) {
   /** A file's text, `given` being the path as it was asked for. */
   const text = async (path: string, given: string) => {
     await aFile(path, given);

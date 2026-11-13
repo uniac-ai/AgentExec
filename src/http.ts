@@ -3,6 +3,7 @@
 import { createHash, timingSafeEqual } from "node:crypto";
 import { createServer } from "node:http";
 import type { AddressInfo } from "node:net";
+import type { Reach } from "./files.ts";
 import { createAgentExec } from "./lib.ts";
 
 const LOOPBACK = new Set(["127.0.0.1", "localhost", "::1"]);
@@ -19,6 +20,7 @@ export async function serveHttp(
   listen: string,
   workspace: string,
   level: "read" | "files" | "terminal",
+  reach: Reach,
 ) {
   const { host, port } = parseListen(listen);
   if (!LOOPBACK.has(host))
@@ -26,7 +28,7 @@ export async function serveHttp(
   const token = process.env.AGENTEXEC_TOKEN;
   if (!token) throw new Error("Set AGENTEXEC_TOKEN to the bearer token clients must send.");
   const expected = digest(`Bearer ${token}`);
-  const exec = createAgentExec({ workspace, level });
+  const exec = createAgentExec({ workspace, level, reach });
   const server = createServer((request, response) => {
     if (new URL(request.url ?? "/", "http://localhost").pathname !== "/mcp")
       return void response.writeHead(404).end();
