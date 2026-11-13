@@ -167,13 +167,16 @@ export interface ExtraTool {
 }
 
 export interface AgentExecOptions {
-  /** Where commands start and relative paths begin, and the folder the file tools are kept to. */
+  /**
+   * Where commands start and relative paths begin and, unless `reach` is `machine`, the folder the
+   * file tools are kept to.
+   */
   workspace: string;
   /**
    * Where the file tools reach: the workspace, which is the default, or the whole machine, with
-   * relative paths still from the workspace. Either way it is a check of this program's, not a
-   * boundary: commands reach whatever the user running them can. A host's own files stay within
-   * the workspace.
+   * relative paths still from the workspace. At `workspace` this is a check, not a boundary; at
+   * `machine` there is none. Commands reach whatever the user running them can either way. A
+   * host's own files stay within the workspace whatever this is.
    */
   reach?: Reach;
   /**

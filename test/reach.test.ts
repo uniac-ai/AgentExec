@@ -1,7 +1,17 @@
 // The file tools reach the workspace, or the whole machine with relative paths from the workspace.
 import assert from "node:assert/strict";
+import { spawn } from "node:child_process";
 import { once } from "node:events";
-import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import {
+  lstatSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  realpathSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+} from "node:fs";
 import { createServer } from "node:http";
 import type { AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
@@ -11,7 +21,8 @@ import { fileURLToPath } from "node:url";
 import { Client, StreamableHTTPClientTransport } from "@modelcontextprotocol/client";
 
 type Library = typeof import("../src/lib.ts");
-const LIBRARY = join(dirname(fileURLToPath(import.meta.url)), "..", "..", "dist", "lib.js");
+const DIST = join(dirname(fileURLToPath(import.meta.url)), "..", "..", "dist");
+const LIBRARY = join(DIST, "lib.js");
 
 /** A workspace, a folder beside it with a file in it, and the file tools at `reach`. */
 async function mounted(t: test.TestContext, reach?: "workspace" | "machine") {
@@ -46,7 +57,7 @@ async function mounted(t: test.TestContext, reach?: "workspace" | "machine") {
     };
     return { text: content.map((block) => block.text ?? "").join(""), isError: !!isError };
   };
-  return { workspace, beside, call };
+  return { workspace, beside, call, files: exec.files };
 }
 
 test("by default the file tools stay inside the workspace", async (t) => {
@@ -68,16 +79,17 @@ test("by default the file tools stay inside the workspace", async (t) => {
   assert.match((await call("read", { path: "here.txt" })).text, /here/);
 });
 
-test("reaching the whole machine, they go anywhere, and relative paths start at the workspace", async (t) => {
-  const { workspace, beside, call } = await mounted(t, "machine");
+test("at machine, paths go anywhere and relative ones start at the workspace", async (t) => {
+  const { workspace, beside, call, files } = await mounted(t, "machine");
   const there = join(beside, "there.txt");
   assert.match((await call("read", { path: there })).text, /^1\tthere$/m);
   assert.match((await call("read", { path: "here.txt" })).text, /^1\there$/m);
   assert.match((await call("list", { path: beside })).text, /there\.txt/);
   // A file outside the workspace is named by its whole path, one inside it from the workspace.
-  assert.match(
-    (await call("search", { pattern: "there", path: beside })).text,
-    new RegExp(`^${there}:1:`, "m"),
+  assert.ok(
+    (await call("search", { pattern: "there", path: beside })).text
+      .split("\n")
+      .includes(`${there}:1:there`),
   );
   assert.match((await call("search", { pattern: "here" })).text, /^here\.txt:1:/m);
   const made = join(beside, "new.txt");
@@ -91,4 +103,50 @@ test("reaching the whole machine, they go anywhere, and relative paths start at 
     false,
   );
   assert.equal(readFileSync(join(workspace, "new.txt"), "utf8"), "in\n");
+  // The host's own files stay inside the workspace.
+  await assert.rejects(files.list(beside), /is outside the workspace/);
+});
+
+test("at machine, an edit through a link changes what it points to", async (t) => {
+  const { beside, call } = await mounted(t, "machine");
+  const link = join(beside, "link.txt");
+  symlinkSync(join(beside, "there.txt"), link);
+  assert.equal(
+    (await call("edit", { path: link, old_text: "there", new_text: "changed" })).isError,
+    false,
+  );
+  assert.ok(lstatSync(link).isSymbolicLink());
+  assert.equal(readFileSync(join(beside, "there.txt"), "utf8"), "changed\n");
+  const nowhere = join(beside, "nowhere.txt");
+  symlinkSync(join(beside, "missing.txt"), nowhere);
+  assert.deepEqual(await call("edit", { path: nowhere, old_text: "", new_text: "x" }), {
+    text: `${nowhere} is a link to nothing.`,
+    isError: true,
+  });
+});
+
+test("search names a folder that starts with two dots from the workspace", async (t) => {
+  const { workspace, call } = await mounted(t);
+  mkdirSync(join(workspace, "..dots"));
+  writeFileSync(join(workspace, "..dots", "a.txt"), "dotted\n");
+  assert.match((await call("search", { pattern: "dotted" })).text, /^\.\.dots\/a\.txt:1:/m);
+});
+
+test("--reach takes only workspace or machine", async (t) => {
+  const workspace = realpathSync(mkdtempSync(join(tmpdir(), "agentexec-reach-")));
+  t.after(() => rmSync(workspace, { recursive: true, force: true }));
+  const child = spawn(process.execPath, [
+    join(DIST, "agentexec.js"),
+    "--workspace",
+    workspace,
+    "--reach",
+    "everywhere",
+  ]);
+  let said = "";
+  child.stderr.on("data", (chunk) => {
+    said += chunk;
+  });
+  const [code] = (await once(child, "exit")) as [number];
+  assert.equal(code, 1);
+  assert.match(said, /--reach is workspace or machine\./);
 });

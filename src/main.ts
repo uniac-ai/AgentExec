@@ -1,6 +1,5 @@
 // AgentExec: `agentexec [--workspace DIR] [--level read|files|terminal] [--reach workspace|machine]
-// [--http HOST:PORT]` serves
-// MCP over stdio, or over Streamable HTTP with a bearer token.
+// [--http HOST:PORT]` serves MCP over stdio, or over Streamable HTTP with a bearer token.
 import { realpathSync } from "node:fs";
 import { resolve } from "node:path";
 import { parseArgs } from "node:util";

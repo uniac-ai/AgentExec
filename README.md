@@ -8,7 +8,13 @@ node dist/agentexec.js --workspace /path/to/folder --level files
 
 `--level` decides which tools it offers, each level containing the one before: `read` (the default) has `read`, `list` and `search`; `files` adds `edit`; `terminal` adds `exec_command`, `write_stdin` and `list_sessions`.
 
-It acts with the rights of whoever starts it. The file tools stay inside the workspace, following links, but that is a check and not a boundary; with `--reach machine` (`reach: "machine"` in the library) they reach the whole machine, relative paths still starting at the workspace. Either way, at `terminal` a command can reach anything those rights can. Run it somewhere that is safe for an agent to act.
+It acts with the rights of whoever starts it. The file tools stay inside the workspace, following links, but that is a check and not a boundary. At `terminal` a command can reach anything those rights can. Run it somewhere that is safe for an agent to act.
+
+`--reach machine` (`reach: "machine"` in the library) lets the file tools reach the whole machine. Relative paths still start at the workspace, and `search` names a file outside it by its whole path:
+
+```sh
+node dist/agentexec.js --workspace /path/to/folder --level files --reach machine
+```
 
 To serve it over HTTP, name a loopback address and set the token clients must send. MCP is at `/mcp`:
 
@@ -89,7 +95,7 @@ await upload.finish();
 - `changed` gives the files modified after a time, in whole milliseconds: the newest thousand, the newest first, and `more` says there were others. It skips what `.gitignore` files ignore, `.git`, `node_modules` and links, a file that was removed isn't one of them, and like `search` it is stopped after 20 seconds.
 - `upload` writes a file a part at a time. Nothing is at its path until `finish` puts it there whole, over any file that was there and with that file's permissions; `abort` gives up. It makes no folders, and it is refused at the `read` level, which otherwise decides only the tools. Until it is finished its part-written file sits beside its path as `.agentexec-…`, where a listing, and the agent, can see it. `exec.close()` gives up any upload still open.
 
-They stay inside the workspace as the tools do, and refuse with an error whose message says why.
+They stay inside the workspace whatever `reach` is, and refuse with an error whose message says why.
 
 If you bundle it into a file of your own, don't start anything off the main thread: its search, and `changed`, run that same file on a worker thread.
 

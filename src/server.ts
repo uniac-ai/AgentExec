@@ -1,7 +1,7 @@
 // The seven tools over MCP, and any the host adds.
 import { McpServer } from "@modelcontextprotocol/server";
 import { z } from "zod";
-import { createFiles, type Picture, placer, type Reach } from "./files.ts";
+import { createFiles, type Picture, type Reach, resolver } from "./files.ts";
 import type { ExtraTool } from "./lib.ts";
 import { search } from "./search.ts";
 import {
@@ -87,12 +87,13 @@ export function createServer(
   reach: Reach = "workspace",
 ) {
   const server = new McpServer({ name: "agentexec", version });
-  const at = placer(root, reach);
+  const at = resolver(root, reach);
   const files = createFiles(at);
   const where =
     reach === "machine"
       ? "Relative to the workspace, or absolute, anywhere on the machine."
       : "Inside the workspace; relative to it, or absolute.";
+  const orWorkspace = `${where} The workspace by default.`;
   for (const { name, description, readOnly, call } of extraTools)
     server.registerTool(
       name,
@@ -197,7 +198,7 @@ export function createServer(
     "list",
     {
       description: "Lists a folder: folders end in /, and files give their size in bytes.",
-      inputSchema: { path: z.string().optional().describe("The workspace by default.") },
+      inputSchema: { path: z.string().optional().describe(orWorkspace) },
       annotations: READ_ONLY,
     },
     (input) => saying(() => files.list(input)),
@@ -205,11 +206,10 @@ export function createServer(
   server.registerTool(
     "search",
     {
-      description:
-        "Searches text files under a folder, as path:line:text. Skips what .gitignore ignores, .git and node_modules.",
+      description: `Searches text files under a folder, as path:line:text, the path from the workspace${reach === "machine" ? ", or whole for a file outside it" : ""}. Skips what .gitignore ignores, .git and node_modules.`,
       inputSchema: {
         pattern: z.string().min(1).describe("Exact text, or a regular expression with regex."),
-        path: z.string().optional().describe("A folder or file; the workspace by default."),
+        path: z.string().optional().describe(`A folder or file. ${orWorkspace}`),
         regex: z.boolean().optional(),
         ignore_case: z.boolean().optional(),
         limit: z.number().int().positive().optional().describe("Most matches; 200 by default."),
