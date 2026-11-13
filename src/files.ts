@@ -72,6 +72,18 @@ export const refusing = async <T>(work: () => Promise<T>) => {
 export const foldersFirst = (a: Dirent, b: Dirent) =>
   Number(b.isDirectory()) - Number(a.isDirectory()) || a.name.localeCompare(b.name);
 
+/** Where the file tools reach: the workspace, or the whole machine. */
+export type Reach = "workspace" | "machine";
+
+/**
+ * Where a path given to the file tools is. Relative ones start at `root`. Within the workspace
+ * they must stay inside it; across the whole machine they may be anywhere.
+ */
+export const placer =
+  (root: string, reach: Reach) =>
+  (path: string): Promise<string> =>
+    reach === "machine" ? Promise.resolve(resolve(root, path)) : inside(root, path);
+
 /**
  * Where `path` really is, following links, if that is inside `root`, which must itself be a real
  * path. A path that doesn't exist yet is judged by the nearest folder above it that does. This is
@@ -115,8 +127,7 @@ export async function aFile(path: string, given: string) {
   return found;
 }
 
-export function createFiles(root: string) {
-  const at = (path: string) => inside(root, path);
+export function createFiles(at: (path: string) => Promise<string>) {
   /** A file's text, `given` being the path as it was asked for. */
   const text = async (path: string, given: string) => {
     await aFile(path, given);

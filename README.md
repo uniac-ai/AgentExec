@@ -8,7 +8,7 @@ node dist/agentexec.js --workspace /path/to/folder --level files
 
 `--level` decides which tools it offers, each level containing the one before: `read` (the default) has `read`, `list` and `search`; `files` adds `edit`; `terminal` adds `exec_command`, `write_stdin` and `list_sessions`.
 
-It acts with the rights of whoever starts it. The file tools stay inside the workspace, following links, but that is a check and not a boundary, and at `terminal` a command can reach anything those rights can. Run it somewhere that is safe for an agent to act.
+It acts with the rights of whoever starts it. The file tools stay inside the workspace, following links, but that is a check and not a boundary; with `--reach machine` (`reach: "machine"` in the library) they reach the whole machine, relative paths still starting at the workspace. Either way, at `terminal` a command can reach anything those rights can. Run it somewhere that is safe for an agent to act.
 
 To serve it over HTTP, name a loopback address and set the token clients must send. MCP is at `/mcp`:
 
@@ -105,7 +105,7 @@ If you bundle it into a file of your own, don't start anything off the main thre
 | `search`        | Text under a folder, as `path:line:text`. Exact text unless `regex`. Skips what `.gitignore` ignores, `.git` and `node_modules`.                                                                                                                    |
 | `edit`          | Replaces exact text, which must appear once unless `replace_all`, and answers with a unified diff. An empty `old_text` creates a new file.                                                                                                          |
 
-Relative paths are relative to the workspace, and a path that really lies outside it is refused. A failed tool sets MCP's `isError`; a command that exits non-zero is an answer, not a failure.
+Relative paths are relative to the workspace, and a path that really lies outside it is refused, unless the file tools reach the whole machine. `search` then names a file outside the workspace by its whole path. A failed tool sets MCP's `isError`; a command that exits non-zero is an answer, not a failure.
 
 ## The answer from `exec_command` and `write_stdin`
 
