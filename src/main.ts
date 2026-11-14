@@ -29,7 +29,7 @@ async function main() {
   const root = realpathSync(resolve(values.workspace ?? process.cwd()));
   if (values.http) return serveHttp(values.http, root, level, reach);
   const sessions = new Sessions(root);
-  const server = createServer(root, sessions, VERSION, level, [], reach);
+  const server = createServer(root, sessions, VERSION, level, { reach });
   let stopping = false;
   const stop = async () => {
     if (stopping) return;
