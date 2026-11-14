@@ -1,8 +1,8 @@
 // The seven tools over MCP, and any the host adds.
 import { McpServer } from "@modelcontextprotocol/server";
 import { z } from "zod";
-import { createFiles, type Picture, type Reach, resolver } from "./files.ts";
-import type { ExtraTool, Note } from "./lib.ts";
+import { createFiles, type Picture, resolver } from "./files.ts";
+import type { AgentExecOptions } from "./lib.ts";
 import { search } from "./search.ts";
 import {
   type Answer,
@@ -62,6 +62,7 @@ const groupOf = (meta: Record<string, unknown> | undefined) => {
 const YieldTime = z.number().int().positive().optional();
 const MaxTokens = z.number().int().positive().optional();
 const READ_ONLY = { readOnlyHint: true };
+type Input = Record<string, unknown>;
 
 /** AgentExec's own tools, at one level or another. */
 export const TOOLS = [
@@ -83,14 +84,18 @@ export function createServer(
   sessions: Sessions,
   version: string,
   level: Level,
-  extraTools: ExtraTool[] = [],
-  reach: Reach = "workspace",
-  note?: Note,
+  {
+    extraTools = [],
+    reach = "workspace",
+    note,
+  }: Partial<Pick<AgentExecOptions, "extraTools" | "reach" | "note">> = {},
 ) {
   const server = new McpServer({ name: "agentexec", version });
   if (note) {
-    // Each tool's answer ends with the host's line about the call, where it has one. It is asked
-    // as the call begins, before the tool runs.
+    // Every tool registers through here, so each answer, a refusal or a picture among them, ends
+    // with the host's line about the call where it has one. The SDK gives a tool with an input
+    // schema its input first, and one without only the request's context. The host is asked
+    // before the tool runs, and given a copy, so what it does to the input can't change the call.
     const register = server.registerTool.bind(server);
     server.registerTool = ((
       name: string,
@@ -101,15 +106,15 @@ export function createServer(
         name,
         config as never,
         (async (...args: unknown[]) => {
-          let line: string | undefined;
+          let line: unknown;
           try {
-            line = note(name, (config.inputSchema ? args[0] : {}) as Record<string, unknown>);
+            line = note(name, config.inputSchema ? structuredClone(args[0] as Input) : {});
           } catch {
             // A note that fails is left out; the call is answered as it would be.
           }
           const answer = (await handler(...args)) as { content: unknown[] };
-          return line
-            ? { ...answer, content: [...answer.content, { type: "text", text: line }] }
+          return typeof line === "string" && line
+            ? { ...answer, content: [...answer.content, text(line).content[0]] }
             : answer;
         }) as never,
       )) as typeof server.registerTool;

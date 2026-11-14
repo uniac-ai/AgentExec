@@ -192,14 +192,15 @@ export interface AgentExecOptions {
   /** Tools the host adds. A name of one of AgentExec's seven, or one given twice, is refused. */
   extraTools?: ExtraTool[];
   /**
-   * A line the host adds to a tool's answer, such as who else has acted on what the call touches.
-   * Asked as each call begins, with the tool's name and its input, and added after the answer
-   * where it gives one.
+   * Adds a line of text to a tool's answer. Called before each tool runs, a host's own among them,
+   * with the tool's name and a copy of its input as the agent sent it (`{}` for a tool that takes
+   * none). Its line is added after the answer, a refusal's too; giving nothing, or throwing, adds
+   * nothing.
    */
   note?: Note;
 }
 
-/** The line to add to a call's answer, or nothing. A host's own tools are asked about too. */
+/** What `note` is: a tool's name and input, to the line for its answer, or nothing. */
 export type Note = (tool: string, input: Record<string, unknown>) => string | undefined;
 
 export interface AgentExec {
@@ -251,15 +252,11 @@ export function createAgentExec(options: AgentExecOptions): AgentExec {
   }
   return {
     async handle(request, response, body) {
-      const server = createServer(
-        root,
-        sessions,
-        VERSION,
-        level,
+      const server = createServer(root, sessions, VERSION, level, {
         extraTools,
-        options.reach,
-        options.note,
-      );
+        reach: options.reach,
+        note: options.note,
+      });
       const transport = new NodeStreamableHTTPServerTransport({ sessionIdGenerator: undefined });
       response.once("close", () => {
         void transport.close();

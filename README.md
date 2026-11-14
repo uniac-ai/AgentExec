@@ -56,19 +56,23 @@ const exec = createAgentExec({
 
 A tool added this way takes no input and answers text. It is offered at every level, whatever `level` is. One that throws is answered as a refusal, with the error's message, which the agent reads. `readOnly` tells an agent's client that it only reads. A name of one of AgentExec's seven, or one given twice, is refused when `createAgentExec` is called.
 
-A host can also add a line to a tool's answer, for what it knows of the call and AgentExec doesn't, such as who else has just acted on what the call touches:
+A host can also add a line to a tool's answer, for something it knows that AgentExec doesn't, such as that a person just typed in the same terminal:
 
 ```js
+const typedBy = new Map(); // session id → when the person last typed there, kept by the host
+
 const exec = createAgentExec({
   workspace: "/path/to/folder",
   note: (tool, input) =>
-    tool === "write_stdin" && personTypedIn(input.session_id)
-      ? "The person typed in this terminal 3 s ago."
+    tool === "write_stdin" && typedBy.has(input.session_id)
+      ? `The person typed in this terminal ${Math.round((Date.now() - typedBy.get(input.session_id)) / 1000)} s ago.`
       : undefined,
 });
 ```
 
-`note` is asked as each call begins, before the tool runs, with the tool's name and its input (`{}` for a tool that takes none, a host's own among them). The line it gives is added to the answer, after what the tool said, as a text of its own. One that gives nothing, or throws, adds nothing, and the call is answered as it would be.
+- **When it is asked:** before each tool runs, a host's own among them. It gets the tool's name and a copy of its input as the agent sent it, `{}` for a tool that takes none.
+- **Where the line goes:** after the answer, as a separate text in its `content`, on a refusal too. Its `structuredContent`, where it has one, is unchanged.
+- **When nothing is added:** when it gives nothing, or throws.
 
 Each terminal gives a `start` (its `cmd`, `workdir` and `at`, who started it as `by`, and `tty`), `output` as it's written (`text`, and for a command its `stream`, `stdout` or `stderr`), and an `exit` (`exitCode` and `at`). Each event has the `id` its session's answers carry as `session_id`. The agent's answers don't change.
 
