@@ -2,7 +2,7 @@
 import { McpServer } from "@modelcontextprotocol/server";
 import { z } from "zod";
 import { createFiles, type Picture, type Reach, resolver } from "./files.ts";
-import type { ExtraTool } from "./lib.ts";
+import type { ExtraTool, Note } from "./lib.ts";
 import { search } from "./search.ts";
 import {
   type Answer,
@@ -85,8 +85,35 @@ export function createServer(
   level: Level,
   extraTools: ExtraTool[] = [],
   reach: Reach = "workspace",
+  note?: Note,
 ) {
   const server = new McpServer({ name: "agentexec", version });
+  if (note) {
+    // Each tool's answer ends with the host's line about the call, where it has one. It is asked
+    // as the call begins, before the tool runs.
+    const register = server.registerTool.bind(server);
+    server.registerTool = ((
+      name: string,
+      config: { inputSchema?: unknown },
+      handler: (...args: unknown[]) => unknown,
+    ) =>
+      register(
+        name,
+        config as never,
+        (async (...args: unknown[]) => {
+          let line: string | undefined;
+          try {
+            line = note(name, (config.inputSchema ? args[0] : {}) as Record<string, unknown>);
+          } catch {
+            // A note that fails is left out; the call is answered as it would be.
+          }
+          const answer = (await handler(...args)) as { content: unknown[] };
+          return line
+            ? { ...answer, content: [...answer.content, { type: "text", text: line }] }
+            : answer;
+        }) as never,
+      )) as typeof server.registerTool;
+  }
   const at = resolver(root, reach);
   const files = createFiles(at);
   const where =

@@ -191,7 +191,16 @@ export interface AgentExecOptions {
   pty?: PtySpawn;
   /** Tools the host adds. A name of one of AgentExec's seven, or one given twice, is refused. */
   extraTools?: ExtraTool[];
+  /**
+   * A line the host adds to a tool's answer, such as who else has acted on what the call touches.
+   * Asked as each call begins, with the tool's name and its input, and added after the answer
+   * where it gives one.
+   */
+  note?: Note;
 }
+
+/** The line to add to a call's answer, or nothing. A host's own tools are asked about too. */
+export type Note = (tool: string, input: Record<string, unknown>) => string | undefined;
 
 export interface AgentExec {
   /** Answer one MCP request. Pass `body` if the host has already parsed it. */
@@ -242,7 +251,15 @@ export function createAgentExec(options: AgentExecOptions): AgentExec {
   }
   return {
     async handle(request, response, body) {
-      const server = createServer(root, sessions, VERSION, level, extraTools, options.reach);
+      const server = createServer(
+        root,
+        sessions,
+        VERSION,
+        level,
+        extraTools,
+        options.reach,
+        options.note,
+      );
       const transport = new NodeStreamableHTTPServerTransport({ sessionIdGenerator: undefined });
       response.once("close", () => {
         void transport.close();
