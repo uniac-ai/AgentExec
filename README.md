@@ -70,9 +70,10 @@ const exec = createAgentExec({
 });
 ```
 
-- **When it is asked:** before each tool runs, a host's own among them. It gets the tool's name and a copy of its input as the agent sent it, `{}` for a tool that takes none.
-- **Where the line goes:** after the answer, as a separate text in its `content`, on a refusal too. Its `structuredContent`, where it has one, is unchanged.
-- **When nothing is added:** when it gives nothing, or throws.
+- **When it is asked:** before each tool runs, tools added with `extraTools` among them, so it describes how things stand going in, not what the tool did. It gets the tool's name and a copy of the input, `{}` for a tool that takes none; changing the copy doesn't change the call.
+- **What the agent sees:** the tool's answer as it was, then the line as a text of its own: `content: [{ type: "text", text: "<the answer>" }, { type: "text", text: "<the line>" }]`. That holds on a refusal and on an image too. `structuredContent`, where an answer has one, is unchanged. The agent reads the line as part of the answer, so keep it short and plain, and put nothing in it you wouldn't show the agent.
+- **When nothing is added:** when it gives nothing, an empty string or anything but a string, or throws. It must return the line itself, not a promise. A throw isn't reported anywhere.
+- **Library only:** the command line has no flag for it. Without it, nothing changes.
 
 Each terminal gives a `start` (its `cmd`, `workdir` and `at`, who started it as `by`, and `tty`), `output` as it's written (`text`, and for a command its `stream`, `stdout` or `stderr`), and an `exit` (`exitCode` and `at`). Each event has the `id` its session's answers carry as `session_id`. The agent's answers don't change.
 

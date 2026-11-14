@@ -1,6 +1,6 @@
 {
   "name": "@agentorg/exec",
-  "version": "0.0.9",
+  "version": "0.0.10",
   "description": "A terminal and files for an agent: seven MCP tools, over stdio or Streamable HTTP",
   "license": "Apache-2.0",
   "repository": {
